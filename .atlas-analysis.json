@@ -1,0 +1,168 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "LangSmith SDK",
+  "projectDescription": "Client SDK for connecting to the LangSmith Observability and Evaluation Platform",
+  "theme": "palm",
+  "primaryColor": "#1C64F2",
+  "lightColor": "#3B82F6",
+  "darkColor": "#1E40AF",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/tracing",
+              "concepts/evaluation",
+              "concepts/datasets",
+              "concepts/run-trees"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/tracing-with-langchain",
+              "guides/tracing-without-langchain",
+              "guides/openai-integration",
+              "guides/anthropic-integration",
+              "guides/test-integrations",
+              "guides/prompt-caching",
+              "guides/anonymization"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Python API",
+        "groups": [
+          {
+            "group": "Client",
+            "pages": [
+              "python/client",
+              "python/async-client"
+            ]
+          },
+          {
+            "group": "Tracing",
+            "pages": [
+              "python/traceable",
+              "python/run-tree",
+              "python/tracing-context"
+            ]
+          },
+          {
+            "group": "Evaluation",
+            "pages": [
+              "python/evaluate",
+              "python/evaluators",
+              "python/testing"
+            ]
+          },
+          {
+            "group": "Wrappers",
+            "pages": [
+              "python/wrappers/openai",
+              "python/wrappers/anthropic",
+              "python/wrappers/overview"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "python/schemas",
+              "python/prompt-cache",
+              "python/utils"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "TypeScript API",
+        "groups": [
+          {
+            "group": "Client",
+            "pages": [
+              "typescript/client"
+            ]
+          },
+          {
+            "group": "Tracing",
+            "pages": [
+              "typescript/traceable",
+              "typescript/run-tree"
+            ]
+          },
+          {
+            "group": "Evaluation",
+            "pages": [
+              "typescript/evaluate",
+              "typescript/evaluators"
+            ]
+          },
+          {
+            "group": "Wrappers",
+            "pages": [
+              "typescript/wrappers/openai",
+              "typescript/wrappers/anthropic",
+              "typescript/wrappers/gemini",
+              "typescript/wrappers/overview"
+            ]
+          },
+          {
+            "group": "Test Integrations",
+            "pages": [
+              "typescript/jest",
+              "typescript/vitest"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "typescript/schemas",
+              "typescript/prompt-cache"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Tracing and observability for LLM applications",
+    "Evaluation framework for language models",
+    "Dataset management and versioning",
+    "Native wrappers for OpenAI, Anthropic, and Gemini SDKs",
+    "Test framework integrations (Jest, Vitest, Pytest)",
+    "Prompt caching and optimization",
+    "Data anonymization and privacy controls"
+  ],
+  "publicApiSurface": [
+    "Client",
+    "AsyncClient",
+    "traceable",
+    "RunTree",
+    "evaluate",
+    "evaluate_existing",
+    "aevaluate",
+    "aevaluate_existing",
+    "wrap_openai",
+    "wrapOpenAI",
+    "wrap_anthropic",
+    "wrapAnthropic",
+    "wrapGemini",
+    "PromptCache",
+    "test",
+    "expect",
+    "EvaluationResult",
+    "RunEvaluator"
+  ]
+}
