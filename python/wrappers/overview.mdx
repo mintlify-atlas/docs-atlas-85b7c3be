@@ -64,19 +64,31 @@ response = client.messages.create(
 
 ### Google Gemini (Beta)
 
-Trace Google Gemini API calls.
+Trace Google Gemini API calls including text generation, multimodal inputs, and tool calling.
 
 ```python
 from langsmith import wrappers
-import google.generativeai as genai
+from google import genai
 
-client = wrappers.wrap_gemini(genai.GenerativeModel("gemini-pro"))
+client = wrappers.wrap_gemini(genai.Client(api_key="your-api-key"))
 
-response = client.generate_content("Hello!")
+response = client.models.generate_content(
+    model="gemini-2.5-flash",
+    contents="Hello!",
+)
 # Automatically traced
 ```
 
-**Note:** This wrapper is in beta. See the source code for full details.
+[View Gemini wrapper documentation →](/python/wrappers/gemini)
+
+**Supports:**
+- Text generation
+- Streaming (sync and async)
+- Tool/function calling
+- Multimodal inputs (text + images)
+- Image generation
+- Token usage tracking
+- Thinking models
 
 ## Common parameters
 

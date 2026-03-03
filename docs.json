@@ -86,6 +86,7 @@
             "pages": [
               "python/wrappers/openai",
               "python/wrappers/anthropic",
+              "python/wrappers/gemini",
               "python/wrappers/overview"
             ]
           },

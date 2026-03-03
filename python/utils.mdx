@@ -5,6 +5,37 @@ description: Utility functions and classes for LangSmith integration
 
 The `langsmith.utils` module provides utility functions and classes for working with the LangSmith SDK.
 
+## UUID generation
+
+### uuid7
+
+Generate a UUID version 7 (time-ordered).
+
+```python
+from langsmith import uuid7
+
+# Generate a new UUID7
+trace_id = uuid7()
+print(trace_id)  # UUID('01234567-89ab-cdef-0123-456789abcdef')
+```
+
+UUID7 is time-ordered, making it suitable for distributed systems and database indexing. Used internally by LangSmith for trace and run IDs.
+
+### uuid7_from_datetime
+
+Generate a UUID7 from a specific datetime.
+
+```python
+from langsmith import uuid7_from_datetime
+from datetime import datetime, timezone
+
+# Generate UUID7 for a specific timestamp
+dt = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+trace_id = uuid7_from_datetime(dt)
+```
+
+Useful for backfilling traces or testing with deterministic IDs.
+
 ## ContextThreadPoolExecutor
 
 Thread pool executor that preserves context variables across threads.

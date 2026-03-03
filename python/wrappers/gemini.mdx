@@ -1,0 +1,215 @@
+---
+title: wrap_gemini
+description: Automatic tracing for Google Gemini API
+---
+
+The `wrap_gemini()` function adds automatic LangSmith tracing to Google's Gemini client.
+
+<Warning>
+**BETA**: This wrapper is in beta and the API may change.
+</Warning>
+
+## Installation
+
+Install the Google Generative AI package:
+
+```bash
+pip install google-genai
+```
+
+## Basic usage
+
+```python
+from google import genai
+from langsmith import wrappers
+
+# Wrap the Gemini client
+client = wrappers.wrap_gemini(genai.Client(api_key="your-api-key"))
+
+# Use the client normally - all calls are automatically traced
+response = client.models.generate_content(
+    model="gemini-2.5-flash",
+    contents="Why is the sky blue?",
+)
+print(response.text)
+```
+
+## Supported features
+
+The wrapper supports:
+
+- `generate_content` and `generate_content_stream` methods
+- Sync and async clients
+- Streaming and non-streaming responses
+- Tool/function calling with proper UI rendering
+- Multimodal inputs (text + images)
+- Image generation with `inline_data` support
+- Token usage tracking including reasoning tokens
+
+## Streaming
+
+```python
+for chunk in client.models.generate_content_stream(
+    model="gemini-2.5-flash",
+    contents="Tell me a story",
+):
+    print(chunk.text, end="")
+```
+
+## Tool calling
+
+```python
+from google.genai import types
+
+# Define a function
+schedule_meeting_function = {
+    "name": "schedule_meeting",
+    "description": "Schedules a meeting with specified attendees.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "attendees": {"type": "array", "items": {"type": "string"}},
+            "date": {"type": "string"},
+            "time": {"type": "string"},
+            "topic": {"type": "string"},
+        },
+        "required": ["attendees", "date", "time", "topic"],
+    },
+}
+
+# Create tools config
+tools = types.Tool(function_declarations=[schedule_meeting_function])
+config = types.GenerateContentConfig(tools=[tools])
+
+response = client.models.generate_content(
+    model="gemini-2.5-flash",
+    contents="Schedule a meeting with Bob and Alice tomorrow at 2 PM.",
+    config=config,
+)
+```
+
+## Multimodal inputs
+
+```python
+# Text and image
+response = client.models.generate_content(
+    model="gemini-2.5-flash",
+    contents=[
+        {"role": "user", "parts": [
+            {"text": "What's in this image?"},
+            {"inline_data": {
+                "mime_type": "image/jpeg",
+                "data": image_bytes
+            }}
+        ]}
+    ],
+)
+```
+
+## Image generation
+
+```python
+response = client.models.generate_content(
+    model="gemini-2.5-flash-image",
+    contents=["Create a picture of a futuristic city"],
+)
+
+# Access generated images
+for candidate in response.candidates:
+    for part in candidate.content.parts:
+        if hasattr(part, 'inline_data'):
+            image_data = part.inline_data.data
+            mime_type = part.inline_data.mime_type
+```
+
+## API reference
+
+<ParamField path="client" type="genai.Client" required>
+  The Google Generative AI client to wrap.
+</ParamField>
+
+<ParamField path="tracing_extra" type="TracingExtra | None">
+  Additional tracing configuration:
+  
+  <Expandable title="TracingExtra properties">
+    <ParamField path="project_name" type="str | None">
+      Override the default project name
+    </ParamField>
+    
+    <ParamField path="tags" type="list[str] | None">
+      Tags to add to all traces
+    </ParamField>
+    
+    <ParamField path="metadata" type="dict | None">
+      Metadata to add to all traces
+    </ParamField>
+    
+    <ParamField path="client" type="Client | None">
+      Custom LangSmith client instance
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="chat_name" type="str" default="ChatGoogleGenerativeAI">
+  The run name for chat endpoint traces.
+</ParamField>
+
+## What gets traced
+
+For each API call, the trace includes:
+
+- **Inputs**: Model name, prompt/messages, generation config
+- **Outputs**: Generated text, tool calls, or images
+- **Metadata**: 
+  - Model name
+  - Temperature, top_p, top_k settings
+  - Safety settings
+  - Tool/function declarations
+- **Token usage**: Prompt tokens, completion tokens, reasoning tokens
+- **Timing**: Start time, end time, duration
+- **Errors**: Full error messages and stack traces
+
+## Thinking models
+
+Gemini 2.0 Flash Thinking models are fully supported:
+
+```python
+response = client.models.generate_content(
+    model="gemini-2.0-flash-thinking-exp",
+    contents="Solve this puzzle: If it takes 5 machines 5 minutes to make 5 widgets, how long would it take 100 machines to make 100 widgets?",
+)
+
+# The trace will show the model's reasoning process
+```
+
+## Async support
+
+```python
+import asyncio
+from google import genai
+from langsmith import wrappers
+
+async def main():
+    client = wrappers.wrap_gemini(genai.Client(api_key="your-api-key"))
+    
+    response = await client.aio.models.generate_content(
+        model="gemini-2.5-flash",
+        contents="Hello!",
+    )
+    print(response.text)
+
+asyncio.run(main())
+```
+
+## Notes
+
+- The wrapper automatically converts Gemini's content format to a standard message format for display in LangSmith
+- Image data is preserved in traces but may be truncated for large images
+- Token usage includes reasoning tokens for thinking models
+- Function calls are rendered with proper UI in the LangSmith dashboard
+
+## See also
+
+- [OpenAI wrapper](/python/wrappers/openai)
+- [Anthropic wrapper](/python/wrappers/anthropic)
+- [Wrappers overview](/python/wrappers/overview)

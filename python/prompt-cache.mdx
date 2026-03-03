@@ -5,6 +5,10 @@ description: Thread-safe LRU cache for prompts with background refresh
 
 The `PromptCache` and `AsyncPromptCache` classes provide in-memory caching for prompts pulled from LangSmith, with automatic background refresh to keep cached data up-to-date.
 
+<Note>
+**Deprecated aliases**: `Cache` and `AsyncCache` are deprecated aliases for `PromptCache` and `AsyncPromptCache`. Use the new names in new code.
+</Note>
+
 ## PromptCache
 
 Synchronous prompt cache with LRU eviction and background refresh.
