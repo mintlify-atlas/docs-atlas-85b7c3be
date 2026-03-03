@@ -1,0 +1,394 @@
+---
+title: Tracing without LangChain
+description: Use the LangSmith SDK standalone to trace any application
+---
+
+You can use LangSmith to trace any application, not just LangChain. The `@traceable` decorator (Python) and `traceable` wrapper (TypeScript) make it easy to instrument your code.
+
+## Basic usage
+
+The `@traceable` decorator automatically captures inputs, outputs, and execution time:
+
+<CodeGroup>
+
+```python Python
+from langsmith import traceable
+
+@traceable
+def generate_response(query: str) -> str:
+    # Your application logic
+    response = f"Answer to: {query}"
+    return response
+
+result = generate_response("What is machine learning?")
+```
+
+```typescript TypeScript
+import { traceable } from "langsmith/traceable";
+
+const generateResponse = traceable(
+  (query: string): string => {
+    // Your application logic
+    const response = `Answer to: ${query}`;
+    return response;
+  },
+  { name: "generate_response" }
+);
+
+const result = await generateResponse("What is machine learning?");
+```
+
+</CodeGroup>
+
+## Async functions
+
+Both sync and async functions are supported:
+
+<CodeGroup>
+
+```python Python
+import asyncio
+from langsmith import traceable
+
+@traceable
+async def fetch_data(url: str) -> dict:
+    # Simulate async API call
+    await asyncio.sleep(0.1)
+    return {"data": f"Content from {url}"}
+
+async def main():
+    result = await fetch_data("https://api.example.com")
+    print(result)
+
+asyncio.run(main())
+```
+
+```typescript TypeScript
+import { traceable } from "langsmith/traceable";
+
+const fetchData = traceable(
+  async (url: string): Promise<object> => {
+    // Simulate async API call
+    await new Promise(resolve => setTimeout(resolve, 100));
+    return { data: `Content from ${url}` };
+  },
+  { name: "fetch_data" }
+);
+
+const result = await fetchData("https://api.example.com");
+console.log(result);
+```
+
+</CodeGroup>
+
+## Nesting traces
+
+Create hierarchical traces by calling traceable functions from within other traceable functions:
+
+<CodeGroup>
+
+```python Python
+from langsmith import traceable
+
+@traceable
+def retrieve_documents(query: str) -> list[str]:
+    # Simulate document retrieval
+    return ["doc1", "doc2", "doc3"]
+
+@traceable
+def generate_answer(query: str, documents: list[str]) -> str:
+    # Simulate answer generation
+    return f"Answer based on {len(documents)} documents"
+
+@traceable(name="rag_pipeline")
+def rag_pipeline(query: str) -> str:
+    # Nested traces: retrieve -> generate
+    docs = retrieve_documents(query)
+    answer = generate_answer(query, docs)
+    return answer
+
+result = rag_pipeline("What is RAG?")
+```
+
+```typescript TypeScript
+import { traceable } from "langsmith/traceable";
+
+const retrieveDocuments = traceable(
+  (query: string): string[] => {
+    // Simulate document retrieval
+    return ["doc1", "doc2", "doc3"];
+  },
+  { name: "retrieve_documents" }
+);
+
+const generateAnswer = traceable(
+  (query: string, documents: string[]): string => {
+    // Simulate answer generation
+    return `Answer based on ${documents.length} documents`;
+  },
+  { name: "generate_answer" }
+);
+
+const ragPipeline = traceable(
+  async (query: string): Promise<string> => {
+    // Nested traces: retrieve -> generate
+    const docs = await retrieveDocuments(query);
+    const answer = await generateAnswer(query, docs);
+    return answer;
+  },
+  { name: "rag_pipeline" }
+);
+
+const result = await ragPipeline("What is RAG?");
+```
+
+</CodeGroup>
+
+## Adding metadata and tags
+
+Enrich your traces with metadata and tags for better filtering and organization:
+
+<CodeGroup>
+
+```python Python
+from langsmith import traceable
+
+@traceable(
+    tags=["production", "api-v2"],
+    metadata={"version": "2.0.0", "model": "gpt-4"}
+)
+def process_request(request: dict) -> dict:
+    # Your logic here
+    return {"status": "success", "result": request}
+
+result = process_request({"query": "test"})
+```
+
+```typescript TypeScript
+import { traceable } from "langsmith/traceable";
+
+const processRequest = traceable(
+  (request: object): object => {
+    // Your logic here
+    return { status: "success", result: request };
+  },
+  {
+    name: "process_request",
+    tags: ["production", "api-v2"],
+    metadata: { version: "2.0.0", model: "gpt-4" }
+  }
+);
+
+const result = await processRequest({ query: "test" });
+```
+
+</CodeGroup>
+
+## Run types
+
+Specify the type of operation for better categorization:
+
+<CodeGroup>
+
+```python Python
+from langsmith import traceable
+
+@traceable(run_type="llm")
+def call_llm(prompt: str) -> str:
+    # LLM call
+    return "LLM response"
+
+@traceable(run_type="chain")
+def orchestrate(input: str) -> str:
+    # Orchestration logic
+    return call_llm(input)
+
+@traceable(run_type="tool")
+def search_database(query: str) -> list:
+    # Tool/function call
+    return ["result1", "result2"]
+
+@traceable(run_type="retriever")
+def retrieve(query: str) -> list:
+    # Document retrieval
+    return search_database(query)
+```
+
+```typescript TypeScript
+import { traceable } from "langsmith/traceable";
+
+const callLlm = traceable(
+  (prompt: string): string => {
+    // LLM call
+    return "LLM response";
+  },
+  { name: "call_llm", run_type: "llm" }
+);
+
+const orchestrate = traceable(
+  async (input: string): Promise<string> => {
+    // Orchestration logic
+    return await callLlm(input);
+  },
+  { name: "orchestrate", run_type: "chain" }
+);
+
+const searchDatabase = traceable(
+  (query: string): string[] => {
+    // Tool/function call
+    return ["result1", "result2"];
+  },
+  { name: "search_database", run_type: "tool" }
+);
+
+const retrieve = traceable(
+  async (query: string): Promise<string[]> => {
+    // Document retrieval
+    return await searchDatabase(query);
+  },
+  { name: "retrieve", run_type: "retriever" }
+);
+```
+
+</CodeGroup>
+
+Available run types:
+- `llm` - Language model calls
+- `chain` - Sequences/orchestration
+- `tool` - Function/tool calls
+- `retriever` - Document retrieval
+- `embedding` - Embedding generation
+- `prompt` - Prompt formatting
+
+## Generators and streaming
+
+Trace streaming/generator functions:
+
+<CodeGroup>
+
+```python Python
+from langsmith import traceable
+
+@traceable
+def stream_tokens(text: str):
+    """Stream text word by word."""
+    for word in text.split():
+        yield word
+
+# Use the generator
+for token in stream_tokens("Hello world from LangSmith"):
+    print(token, end=" ")
+```
+
+```typescript TypeScript
+import { traceable } from "langsmith/traceable";
+
+const streamTokens = traceable(
+  async function* (text: string) {
+    // Stream text word by word
+    for (const word of text.split(" ")) {
+      yield word;
+    }
+  },
+  { name: "stream_tokens" }
+);
+
+// Use the generator
+for await (const token of streamTokens("Hello world from LangSmith")) {
+  process.stdout.write(token + " ");
+}
+```
+
+</CodeGroup>
+
+## Setting project name
+
+Specify which project to log traces to:
+
+<CodeGroup>
+
+```python Python
+import os
+from langsmith import traceable
+
+# Via environment variable (recommended)
+os.environ["LANGSMITH_PROJECT"] = "my-project"
+
+@traceable
+def my_function(input: str) -> str:
+    return f"Processed: {input}"
+
+# Or via decorator parameter
+@traceable(project_name="my-other-project")
+def another_function(input: str) -> str:
+    return f"Processed: {input}"
+```
+
+```typescript TypeScript
+import { traceable } from "langsmith/traceable";
+
+// Via environment variable (recommended)
+process.env.LANGSMITH_PROJECT = "my-project";
+
+const myFunction = traceable(
+  (input: string): string => {
+    return `Processed: ${input}`;
+  },
+  { name: "my_function" }
+);
+
+// Or via options parameter
+const anotherFunction = traceable(
+  (input: string): string => {
+    return `Processed: ${input}`;
+  },
+  { name: "another_function", project_name: "my-other-project" }
+);
+```
+
+</CodeGroup>
+
+## Error handling
+
+Errors are automatically captured in traces:
+
+<CodeGroup>
+
+```python Python
+from langsmith import traceable
+
+@traceable
+def process_data(data: dict) -> dict:
+    if not data:
+        raise ValueError("Data cannot be empty")
+    return {"processed": data}
+
+try:
+    result = process_data({})
+except ValueError as e:
+    # Error will be logged in LangSmith trace
+    print(f"Error: {e}")
+```
+
+```typescript TypeScript
+import { traceable } from "langsmith/traceable";
+
+const processData = traceable(
+  (data: object): object => {
+    if (!data || Object.keys(data).length === 0) {
+      throw new Error("Data cannot be empty");
+    }
+    return { processed: data };
+  },
+  { name: "process_data" }
+);
+
+try {
+  const result = await processData({});
+} catch (e) {
+  // Error will be logged in LangSmith trace
+  console.log(`Error: ${e.message}`);
+}
+```
+
+</CodeGroup>

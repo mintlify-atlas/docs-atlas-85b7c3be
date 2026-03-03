@@ -1,0 +1,377 @@
+---
+title: Wrappers overview
+description: Automatic tracing for popular LLM providers
+---
+
+LangSmith provides wrapper functions that add automatic tracing to LLM provider clients. Simply wrap your existing client and all API calls are traced with no code changes.
+
+## Available wrappers
+
+### OpenAI
+
+Trace OpenAI API calls including chat completions, completions, and streaming.
+
+```python
+from langsmith import wrappers
+import openai
+
+client = wrappers.wrap_openai(openai.Client())
+
+response = client.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+# Automatically traced
+```
+
+[View OpenAI wrapper documentation →](/python/wrappers/openai)
+
+**Supports:**
+- Chat completions
+- Text completions
+- Streaming (sync and async)
+- Tool/function calling
+- Token usage tracking
+- Azure OpenAI
+
+### Anthropic
+
+Trace Anthropic Claude API calls including messages, streaming, and tool use.
+
+```python
+from langsmith import wrappers
+import anthropic
+
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+response = client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+# Automatically traced
+```
+
+[View Anthropic wrapper documentation →](/python/wrappers/anthropic)
+
+**Supports:**
+- Messages API
+- Streaming (sync and async)
+- Tool use
+- Prompt caching
+- Extended thinking (Claude 3.7)
+- Token usage tracking
+
+### Google Gemini (Beta)
+
+Trace Google Gemini API calls.
+
+```python
+from langsmith import wrappers
+import google.generativeai as genai
+
+client = wrappers.wrap_gemini(genai.GenerativeModel("gemini-pro"))
+
+response = client.generate_content("Hello!")
+# Automatically traced
+```
+
+**Note:** This wrapper is in beta. See the source code for full details.
+
+## Common parameters
+
+All wrappers support these common parameters:
+
+```python
+client = wrappers.wrap_<provider>(
+    client,
+    project_name="my-project",      # Override default project
+    tags=["production", "api"],      # Add tags to all traces
+    metadata={"version": "1.0"},     # Add metadata to all traces
+    client_=custom_ls_client         # Use custom LangSmith client
+)
+```
+
+<ParamField path="client" type="ProviderClient" required>
+  The provider's client instance to wrap.
+</ParamField>
+
+<ParamField path="project_name" type="str | None">
+  LangSmith project to log traces to. Overrides environment variable.
+</ParamField>
+
+<ParamField path="tags" type="list[str] | None">
+  Tags applied to all traces from this wrapped client.
+</ParamField>
+
+<ParamField path="metadata" type="dict[str, Any] | None">
+  Metadata applied to all traces from this wrapped client.
+</ParamField>
+
+<ParamField path="client_" type="Client | None">
+  Custom LangSmith client for tracing. Uses default if not provided.
+</ParamField>
+
+## What gets traced
+
+For all wrappers, the following information is automatically captured:
+
+### Request details
+- Model name
+- Provider name
+- Temperature, max_tokens, and other parameters
+- Messages/prompts
+- Tool/function definitions
+
+### Response details
+- Generated text
+- Token usage (input, output, cached)
+- Stop reason
+- Tool calls and responses
+- Finish reason
+
+### Metadata
+- Request timestamp
+- Response latency
+- Provider-specific metadata
+- Error information (if request fails)
+
+## Usage patterns
+
+### Basic wrapping
+
+Wrap your client once at initialization:
+
+```python
+from langsmith import wrappers
+import openai
+
+# Initialize and wrap once
+client = wrappers.wrap_openai(openai.Client())
+
+# Use throughout your application
+def generate(prompt):
+    return client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}]
+    )
+```
+
+### Nested tracing
+
+Combine with `@traceable` for hierarchical traces:
+
+```python
+from langsmith import traceable, wrappers
+import openai
+
+client = wrappers.wrap_openai(openai.Client())
+
+@traceable
+def research_question(question: str) -> str:
+    # Generate search queries
+    queries = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": f"Generate search queries for: {question}"}]
+    )
+    
+    # Synthesize answer
+    answer = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": f"Answer: {question}"}]
+    )
+    
+    return answer.choices[0].message.content
+
+# Creates trace tree:
+# research_question
+# ├── chat completion (queries)
+# └── chat completion (answer)
+```
+
+### Multi-provider applications
+
+Wrap multiple providers in the same application:
+
+```python
+from langsmith import wrappers
+import openai
+import anthropic
+
+openai_client = wrappers.wrap_openai(
+    openai.Client(),
+    tags=["openai"]
+)
+
+anthropic_client = wrappers.wrap_anthropic(
+    anthropic.Anthropic(),
+    tags=["anthropic"]
+)
+
+def compare_responses(prompt: str):
+    openai_resp = openai_client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
+    anthropic_resp = anthropic_client.messages.create(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
+    # Both traced with provider-specific tags
+    return openai_resp, anthropic_resp
+```
+
+### Testing with request caching
+
+Combine wrappers with `@test` for cached testing:
+
+```python
+import pytest
+from langsmith import test, wrappers
+import openai
+
+# Enable caching: export LANGSMITH_TEST_CACHE=tests/cassettes
+
+client = wrappers.wrap_openai(openai.Client())
+
+@test(cached_hosts=["api.openai.com"])
+def test_generation():
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "Say hello"}]
+    )
+    assert "hello" in response.choices[0].message.content.lower()
+    # First run: real API call (cached)
+    # Subsequent runs: instant replay from cache
+```
+
+## Async support
+
+All wrappers support both sync and async clients:
+
+```python
+import asyncio
+from langsmith import wrappers
+import openai
+import anthropic
+
+# Async OpenAI
+openai_async = wrappers.wrap_openai(openai.AsyncClient())
+
+# Async Anthropic
+anthropic_async = wrappers.wrap_anthropic(anthropic.AsyncAnthropic())
+
+async def generate():
+    # Both work seamlessly
+    openai_resp = await openai_async.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": "Hello"}]
+    )
+    
+    anthropic_resp = await anthropic_async.messages.create(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": "Hello"}]
+    )
+    
+    return openai_resp, anthropic_resp
+
+asyncio.run(generate())
+```
+
+## Environment configuration
+
+Wrappers respect LangSmith environment variables:
+
+```bash
+# Enable tracing
+export LANGCHAIN_TRACING_V2=true
+
+# Set default project
+export LANGCHAIN_PROJECT=my-project
+
+# Set API key
+export LANGSMITH_API_KEY=your-key
+```
+
+You can override these per-client:
+
+```python
+client = wrappers.wrap_openai(
+    openai.Client(),
+    project_name="override-project"  # Overrides LANGCHAIN_PROJECT
+)
+```
+
+## Best practices
+
+1. **Wrap once, use everywhere**: Initialize wrapped clients once at application startup
+   ```python
+   # config.py
+   from langsmith import wrappers
+   import openai
+   
+   openai_client = wrappers.wrap_openai(openai.Client())
+   ```
+
+2. **Use tags for organization**: Tag by provider, model, or use case
+   ```python
+   client = wrappers.wrap_openai(
+       openai.Client(),
+       tags=["production", "gpt-4", "customer-support"]
+   )
+   ```
+
+3. **Add version metadata**: Track model and application versions
+   ```python
+   client = wrappers.wrap_anthropic(
+       anthropic.Anthropic(),
+       metadata={"app_version": "2.0.0", "model_version": "claude-3-5"}
+   )
+   ```
+
+4. **Combine with @traceable**: Create meaningful trace hierarchies
+   ```python
+   @traceable(name="rag-pipeline")
+   def rag_pipeline(query):
+       docs = retrieve(query)  # Traced
+       response = llm_client.chat.completions.create(...)  # Traced
+       return response
+   ```
+
+5. **Handle errors**: Wrappers trace errors automatically
+   ```python
+   try:
+       response = client.chat.completions.create(...)
+   except openai.APIError as e:
+       # Error is captured in trace
+       logger.error(f"OpenAI API error: {e}")
+   ```
+
+## Performance considerations
+
+Wrappers add minimal overhead:
+
+- **Sync calls**: Less than 1ms overhead for tracing
+- **Async calls**: Negligible overhead (non-blocking)
+- **Streaming**: No impact on stream throughput
+- **Background upload**: Traces sent asynchronously
+
+Disable tracing in production if needed:
+
+```bash
+export LANGCHAIN_TRACING_V2=false
+```
+
+Or use local-only tracing:
+
+```python
+from langsmith import tracing_context
+
+with tracing_context(enabled="local"):
+    # Traces collected but not uploaded
+    response = client.chat.completions.create(...)
+```

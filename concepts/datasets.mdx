@@ -1,0 +1,598 @@
+---
+title: Datasets
+description: Organize and manage test cases for evaluating your LLM applications
+---
+
+Datasets are collections of examples used to evaluate, test, and improve your LLM applications. Each example contains inputs and optionally expected outputs, forming a ground truth for testing.
+
+## What is a dataset?
+
+A dataset in LangSmith contains:
+
+- **Examples** - Individual test cases with inputs and outputs
+- **Metadata** - Information about the dataset (description, creation date)
+- **Schemas** - Optional input/output schemas for validation
+- **Splits** - Groups like "train" and "test" for organizing examples
+
+## Dataset types
+
+LangSmith supports three dataset types:
+
+### Key-value (kv)
+
+General-purpose datasets with arbitrary input/output dictionaries:
+
+```json
+{
+  "inputs": {
+    "question": "What is the capital of France?",
+    "context": "France is a country in Europe."
+  },
+  "outputs": {
+    "answer": "Paris",
+    "confidence": 0.95
+  }
+}
+```
+
+### LLM
+
+For testing language model completions:
+
+```json
+{
+  "inputs": {
+    "prompt": "Complete this sentence: The capital of France is"
+  },
+  "outputs": {
+    "completion": "Paris."
+  }
+}
+```
+
+### Chat
+
+For testing conversational applications:
+
+```json
+{
+  "inputs": {
+    "messages": [
+      {"role": "user", "content": "What's the weather?"}
+    ]
+  },
+  "outputs": {
+    "messages": [
+      {"role": "assistant", "content": "I can't check real-time weather."}
+    ]
+  }
+}
+```
+
+## Creating datasets
+
+### From scratch
+
+<CodeGroup>
+```python Python
+from langsmith import Client
+
+client = Client()
+
+# Create a dataset
+dataset = client.create_dataset(
+    dataset_name="qa-evaluation",
+    description="Question answering test cases",
+    data_type="kv",  # or "llm" or "chat"
+)
+
+print(f"Created dataset: {dataset.id}")
+```
+
+```typescript TypeScript
+import { Client } from "langsmith";
+
+const client = new Client();
+
+// Create a dataset
+const dataset = await client.createDataset({
+  datasetName: "qa-evaluation",
+  description: "Question answering test cases",
+  dataType: "kv", // or "llm" or "chat"
+});
+
+console.log(`Created dataset: ${dataset.id}`);
+```
+</CodeGroup>
+
+### Adding examples
+
+<CodeGroup>
+```python Python
+# Add examples one at a time
+client.create_example(
+    inputs={"question": "What is LangSmith?"},
+    outputs={"answer": "LangSmith is a platform for LLM observability"},
+    dataset_id=dataset.id,
+)
+
+# Add multiple examples
+examples = [
+    {
+        "inputs": {"question": "What is tracing?"},
+        "outputs": {"answer": "Tracing captures execution flow"},
+    },
+    {
+        "inputs": {"question": "What are evaluators?"},
+        "outputs": {"answer": "Evaluators score LLM outputs"},
+    },
+]
+
+client.create_examples(
+    inputs=[e["inputs"] for e in examples],
+    outputs=[e["outputs"] for e in examples],
+    dataset_id=dataset.id,
+)
+```
+
+```typescript TypeScript
+// Add examples one at a time
+await client.createExample({
+  inputs: { question: "What is LangSmith?" },
+  outputs: { answer: "LangSmith is a platform for LLM observability" },
+  datasetId: dataset.id,
+});
+
+// Add multiple examples
+const examples = [
+  {
+    inputs: { question: "What is tracing?" },
+    outputs: { answer: "Tracing captures execution flow" },
+  },
+  {
+    inputs: { question: "What are evaluators?" },
+    outputs: { answer: "Evaluators score LLM outputs" },
+  },
+];
+
+for (const example of examples) {
+  await client.createExample({
+    inputs: example.inputs,
+    outputs: example.outputs,
+    datasetId: dataset.id,
+  });
+}
+```
+</CodeGroup>
+
+### From CSV or existing data
+
+<CodeGroup>
+```python Python
+import pandas as pd
+
+# From a pandas DataFrame
+df = pd.DataFrame({
+    "question": ["What is AI?", "What is ML?"],
+    "answer": ["Artificial Intelligence", "Machine Learning"],
+})
+
+# Create dataset from DataFrame
+dataset = client.create_dataset(
+    dataset_name="from-csv",
+    data_type="kv",
+)
+
+for _, row in df.iterrows():
+    client.create_example(
+        inputs={"question": row["question"]},
+        outputs={"answer": row["answer"]},
+        dataset_id=dataset.id,
+    )
+
+# Or create dataset and examples in one operation
+dataset = client.create_dataset(
+    dataset_name="from-list",
+    data_type="kv",
+)
+
+client.create_examples(
+    inputs=df["question"].apply(lambda x: {"question": x}).tolist(),
+    outputs=df["answer"].apply(lambda x: {"answer": x}).tolist(),
+    dataset_id=dataset.id,
+)
+```
+
+```typescript TypeScript
+import fs from "fs";
+import { parse } from "csv-parse/sync";
+
+// Read CSV file
+const csvContent = fs.readFileSync("data.csv", "utf-8");
+const records = parse(csvContent, { columns: true });
+
+// Create dataset
+const dataset = await client.createDataset({
+  datasetName: "from-csv",
+  dataType: "kv",
+});
+
+// Add examples from CSV
+for (const record of records) {
+  await client.createExample({
+    inputs: { question: record.question },
+    outputs: { answer: record.answer },
+    datasetId: dataset.id,
+  });
+}
+```
+</CodeGroup>
+
+### From production runs
+
+Capture real usage patterns:
+
+<CodeGroup>
+```python Python
+# Get runs from a production project
+runs = client.list_runs(
+    project_name="production-app",
+    filter='eq(feedback_key, "user_rating") and gte(feedback_score, 4)',
+)
+
+# Create dataset from high-quality runs
+dataset = client.create_dataset(
+    dataset_name="golden-examples",
+    description="High-rated production examples",
+)
+
+for run in runs:
+    client.create_example(
+        inputs=run.inputs,
+        outputs=run.outputs,
+        dataset_id=dataset.id,
+        source_run_id=run.id,  # Link back to original run
+    )
+```
+
+```typescript TypeScript
+// Get runs from a production project
+const runs = await client.listRuns({
+  projectName: "production-app",
+  filter: 'eq(feedback_key, "user_rating") and gte(feedback_score, 4)',
+});
+
+// Create dataset from high-quality runs
+const dataset = await client.createDataset({
+  datasetName: "golden-examples",
+  description: "High-rated production examples",
+});
+
+for await (const run of runs) {
+  await client.createExample({
+    inputs: run.inputs,
+    outputs: run.outputs,
+    datasetId: dataset.id,
+    sourceRunId: run.id, // Link back to original run
+  });
+}
+```
+</CodeGroup>
+
+## Managing datasets
+
+### Reading datasets
+
+<CodeGroup>
+```python Python
+# List all datasets
+datasets = client.list_datasets()
+for dataset in datasets:
+    print(f"{dataset.name}: {dataset.example_count} examples")
+
+# Get a specific dataset
+dataset = client.read_dataset(dataset_name="qa-evaluation")
+print(f"Dataset: {dataset.name}")
+print(f"Created: {dataset.created_at}")
+print(f"Examples: {dataset.example_count}")
+
+# List examples in a dataset
+examples = client.list_examples(dataset_name="qa-evaluation")
+for example in examples:
+    print(f"Input: {example.inputs}")
+    print(f"Output: {example.outputs}")
+```
+
+```typescript TypeScript
+// List all datasets
+const datasets = await client.listDatasets();
+for await (const dataset of datasets) {
+  console.log(`${dataset.name}: ${dataset.example_count} examples`);
+}
+
+// Get a specific dataset
+const dataset = await client.readDataset({ datasetName: "qa-evaluation" });
+console.log(`Dataset: ${dataset.name}`);
+console.log(`Created: ${dataset.created_at}`);
+console.log(`Examples: ${dataset.example_count}`);
+
+// List examples in a dataset
+const examples = await client.listExamples({ datasetName: "qa-evaluation" });
+for await (const example of examples) {
+  console.log("Input:", example.inputs);
+  console.log("Output:", example.outputs);
+}
+```
+</CodeGroup>
+
+### Updating examples
+
+<CodeGroup>
+```python Python
+# Update an example
+example = next(client.list_examples(dataset_name="qa-evaluation"))
+
+client.update_example(
+    example_id=example.id,
+    inputs={"question": "Updated question"},
+    outputs={"answer": "Updated answer"},
+    metadata={"reviewed": True, "reviewer": "alice"},
+)
+```
+
+```typescript TypeScript
+// Update an example
+const examples = await client.listExamples({ datasetName: "qa-evaluation" });
+const example = (await examples.next()).value;
+
+await client.updateExample({
+  exampleId: example.id,
+  inputs: { question: "Updated question" },
+  outputs: { answer: "Updated answer" },
+  metadata: { reviewed: true, reviewer: "alice" },
+});
+```
+</CodeGroup>
+
+### Deleting datasets and examples
+
+<CodeGroup>
+```python Python
+# Delete an example
+client.delete_example(example_id=example.id)
+
+# Delete a dataset (and all its examples)
+client.delete_dataset(dataset_name="qa-evaluation")
+```
+
+```typescript TypeScript
+// Delete an example
+await client.deleteExample({ exampleId: example.id });
+
+// Delete a dataset (and all its examples)
+await client.deleteDataset({ datasetName: "qa-evaluation" });
+```
+</CodeGroup>
+
+## Dataset splits
+
+Organize examples into splits for training and testing:
+
+<CodeGroup>
+```python Python
+# Add examples with splits
+client.create_example(
+    inputs={"question": "Training question"},
+    outputs={"answer": "Training answer"},
+    dataset_id=dataset.id,
+    split="train",
+)
+
+client.create_example(
+    inputs={"question": "Test question"},
+    outputs={"answer": "Test answer"},
+    dataset_id=dataset.id,
+    split="test",
+)
+
+# Filter examples by split
+train_examples = client.list_examples(
+    dataset_name="qa-evaluation",
+    splits=["train"],
+)
+
+test_examples = client.list_examples(
+    dataset_name="qa-evaluation",
+    splits=["test"],
+)
+```
+
+```typescript TypeScript
+// Add examples with splits
+await client.createExample({
+  inputs: { question: "Training question" },
+  outputs: { answer: "Training answer" },
+  datasetId: dataset.id,
+  split: ["train"],
+});
+
+await client.createExample({
+  inputs: { question: "Test question" },
+  outputs: { answer: "Test answer" },
+  datasetId: dataset.id,
+  split: ["test"],
+});
+
+// Filter examples by split
+const trainExamples = await client.listExamples({
+  datasetName: "qa-evaluation",
+  splits: ["train"],
+});
+
+const testExamples = await client.listExamples({
+  datasetName: "qa-evaluation",
+  splits: ["test"],
+});
+```
+</CodeGroup>
+
+## Using datasets in evaluations
+
+Datasets integrate seamlessly with the evaluation framework:
+
+<CodeGroup>
+```python Python
+def my_application(inputs: dict) -> dict:
+    # Your application logic
+    return {"answer": process(inputs["question"])}
+
+# Evaluate using a dataset
+results = client.evaluate(
+    my_application,
+    data="qa-evaluation",  # Use dataset name
+    evaluators=[accuracy_evaluator, relevance_evaluator],
+)
+
+# Or use dataset ID
+results = client.evaluate(
+    my_application,
+    data=dataset.id,
+    evaluators=[accuracy_evaluator],
+)
+
+# Or filter to specific splits
+results = client.evaluate(
+    my_application,
+    data=client.list_examples(
+        dataset_name="qa-evaluation",
+        splits=["test"],
+    ),
+    evaluators=[accuracy_evaluator],
+)
+```
+
+```typescript TypeScript
+function myApplication(inputs: { question: string }): { answer: string } {
+  // Your application logic
+  return { answer: process(inputs.question) };
+}
+
+// Evaluate using a dataset
+const results = await evaluate(myApplication, {
+  data: "qa-evaluation", // Use dataset name
+  evaluators: [accuracyEvaluator, relevanceEvaluator],
+  client,
+});
+
+// Or use dataset ID
+const results2 = await evaluate(myApplication, {
+  data: dataset.id,
+  evaluators: [accuracyEvaluator],
+  client,
+});
+
+// Or filter to specific splits
+const testExamples = await client.listExamples({
+  datasetName: "qa-evaluation",
+  splits: ["test"],
+});
+
+const results3 = await evaluate(myApplication, {
+  data: testExamples,
+  evaluators: [accuracyEvaluator],
+  client,
+});
+```
+</CodeGroup>
+
+## Dataset metadata and versioning
+
+Add rich metadata to track dataset evolution:
+
+<CodeGroup>
+```python Python
+# Create dataset with metadata
+dataset = client.create_dataset(
+    dataset_name="qa-v2",
+    description="Updated Q&A dataset with more examples",
+    metadata={
+        "version": "2.0",
+        "created_by": "data-team",
+        "source": "production-logs",
+        "quality_threshold": 4.0,
+    },
+)
+
+# Update dataset metadata
+client.update_dataset(
+    dataset_id=dataset.id,
+    description="Enhanced Q&A dataset",
+    metadata={
+        **dataset.metadata,
+        "last_updated": "2024-03-15",
+        "num_reviews": 100,
+    },
+)
+```
+
+```typescript TypeScript
+// Create dataset with metadata
+const dataset = await client.createDataset({
+  datasetName: "qa-v2",
+  description: "Updated Q&A dataset with more examples",
+  metadata: {
+    version: "2.0",
+    created_by: "data-team",
+    source: "production-logs",
+    quality_threshold: 4.0,
+  },
+});
+
+// Update dataset metadata
+await client.updateDataset({
+  datasetId: dataset.id,
+  description: "Enhanced Q&A dataset",
+  metadata: {
+    ...dataset.metadata,
+    last_updated: "2024-03-15",
+    num_reviews: 100,
+  },
+});
+```
+</CodeGroup>
+
+## Best practices
+
+<Tip>
+**Start small and iterate**
+
+Begin with 10-20 carefully curated examples. Add more as you identify edge cases.
+</Tip>
+
+<Tip>
+**Use diverse examples**
+
+Include examples that cover different scenarios, edge cases, and potential failure modes.
+</Tip>
+
+<Tip>
+**Capture production data**
+
+Regularly add high-quality production examples to keep your dataset realistic and up-to-date.
+</Tip>
+
+<Tip>
+**Version your datasets**
+
+Use naming conventions (e.g., `qa-v1`, `qa-v2`) or metadata to track dataset versions.
+</Tip>
+
+<Warning>
+Be cautious about including sensitive data in datasets. Review and sanitize production data before adding it.
+</Warning>
+
+## Next steps
+
+- Use datasets in [evaluations](/concepts/evaluation) to assess quality
+- Understand [tracing](/concepts/tracing) to see how examples are processed
+- Learn about dataset versioning in the LangSmith UI

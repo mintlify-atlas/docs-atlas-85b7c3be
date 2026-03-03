@@ -1,0 +1,284 @@
+---
+title: Evaluation functions
+description: Functions for running evaluations and experiments
+---
+
+The LangSmith SDK provides powerful evaluation functions to test your LLM applications against datasets and compare different versions.
+
+## evaluate()
+
+Run an evaluation experiment on a dataset.
+
+```typescript
+import { evaluate } from "langsmith/evaluation";
+
+const results = await evaluate(
+  async (input) => {
+    return await myApp(input.query);
+  },
+  {
+    data: "my-dataset",
+    evaluators: [myEvaluator],
+    experimentPrefix: "my-experiment",
+  }
+);
+```
+
+### Signature
+
+```typescript
+function evaluate(
+  target: TargetT,
+  options: EvaluateOptions
+): Promise<ExperimentResults>
+```
+
+<ParamField path="target" type="TargetT" required>
+  The target function to evaluate. Can be:
+  - An async function: `(input: TInput, config?: TargetConfigT) => Promise<TOutput>`
+  - A sync function: `(input: TInput, config?: TargetConfigT) => TOutput`
+  - An object with `invoke` method
+</ParamField>
+
+<ParamField path="options" type="EvaluateOptions" required>
+  Evaluation options
+  
+  <Accordion title="EvaluateOptions properties">
+    <ParamField path="data" type="DataT" required>
+      The dataset to evaluate on. Can be:
+      - Dataset name (string)
+      - Array of examples
+      - Async iterable of examples
+    </ParamField>
+    
+    <ParamField path="evaluators" type="EvaluatorT[]">
+      A list of evaluators to run on each example.
+    </ParamField>
+    
+    <ParamField path="summaryEvaluators" type="SummaryEvaluatorT[]">
+      A list of summary evaluators to run on the entire dataset.
+    </ParamField>
+    
+    <ParamField path="experimentPrefix" type="string">
+      A prefix to provide for your experiment name.
+    </ParamField>
+    
+    <ParamField path="description" type="string">
+      A free-form description of the experiment.
+    </ParamField>
+    
+    <ParamField path="metadata" type="KVMap">
+      Metadata to attach to the experiment.
+    </ParamField>
+    
+    <ParamField path="maxConcurrency" type="number">
+      The maximum concurrency for predictions/evaluations.
+    </ParamField>
+    
+    <ParamField path="targetConcurrency" type="number">
+      The maximum number of concurrent predictions to run. Defaults to `maxConcurrency` when set.
+    </ParamField>
+    
+    <ParamField path="evaluationConcurrency" type="number">
+      The maximum number of concurrent evaluators to run. Defaults to `maxConcurrency` when set.
+    </ParamField>
+    
+    <ParamField path="client" type="Client">
+      The LangSmith client to use.
+    </ParamField>
+    
+    <ParamField path="numRepetitions" type="number" default="1">
+      The number of repetitions to perform. Each example will be run this many times.
+    </ParamField>
+    
+    <ParamField path="includeAttachments" type="boolean" default="false">
+      Whether to use attachments for the experiment.
+    </ParamField>
+  </Accordion>
+</ParamField>
+
+<ResponseField name="ExperimentResults" type="object">
+  Results of the evaluation
+  
+  <Accordion title="ExperimentResults properties">
+    <ResponseField name="experimentName" type="string">
+      The name of the experiment.
+    </ResponseField>
+    
+    <ResponseField name="results" type="AsyncGenerator<ExperimentResultRow>">
+      Async generator of result rows.
+    </ResponseField>
+    
+    <ResponseField name="summaryResults" type="object">
+      Summary evaluation results.
+    </ResponseField>
+  </Accordion>
+</ResponseField>
+
+## Example evaluators
+
+### Row-level evaluator
+
+Evaluators run on each example and return feedback:
+
+```typescript
+const exactMatchEvaluator = async ({ outputs, referenceOutputs }) => {
+  return {
+    key: "exact_match",
+    score: outputs.answer === referenceOutputs.answer ? 1 : 0,
+  };
+};
+
+const results = await evaluate(
+  (input) => myApp(input.query),
+  {
+    data: "my-dataset",
+    evaluators: [exactMatchEvaluator],
+  }
+);
+```
+
+### Summary evaluator
+
+Summary evaluators run on the entire dataset:
+
+```typescript
+const passRateEvaluator = ({ runs, examples }) => {
+  const passCount = runs.filter(run => run.outputs?.passed).length;
+  return {
+    key: "pass_rate",
+    score: passCount / runs.length,
+  };
+};
+
+const results = await evaluate(
+  (input) => myApp(input.query),
+  {
+    data: "my-dataset",
+    summaryEvaluators: [passRateEvaluator],
+  }
+);
+```
+
+## Evaluator return types
+
+Evaluators can return:
+
+1. Single evaluation result:
+```typescript
+return {
+  key: "accuracy",
+  score: 0.95,
+  comment: "Very accurate",
+};
+```
+
+2. Multiple results:
+```typescript
+return {
+  results: [
+    { key: "accuracy", score: 0.95 },
+    { key: "relevance", score: 0.88 },
+  ],
+};
+```
+
+3. Array of results:
+```typescript
+return [
+  { key: "accuracy", score: 0.95 },
+  { key: "relevance", score: 0.88 },
+];
+```
+
+## evaluateComparative()
+
+Compare multiple experiments or model versions.
+
+```typescript
+import { evaluateComparative } from "langsmith/evaluation";
+
+const results = await evaluateComparative(
+  ["experiment-1", "experiment-2"],
+  {
+    evaluators: [comparativeEvaluator],
+    experimentPrefix: "comparison",
+  }
+);
+```
+
+### Comparative evaluator
+
+```typescript
+const comparativeEvaluator = ({ outputs }) => {
+  // outputs is a map of experiment name to output
+  const scores = {};
+  
+  for (const [name, output] of Object.entries(outputs)) {
+    scores[name] = evaluateOutput(output);
+  }
+  
+  return {
+    key: "quality",
+    scores,
+  };
+};
+```
+
+## Complete example
+
+```typescript
+import { evaluate } from "langsmith/evaluation";
+import { Client } from "langsmith";
+
+const client = new Client();
+
+// Define your target
+const myApp = async (input: { query: string }) => {
+  // Your application logic
+  return { answer: "42" };
+};
+
+// Define evaluators
+const exactMatch = async ({ outputs, referenceOutputs }) => {
+  return {
+    key: "exact_match",
+    score: outputs.answer === referenceOutputs?.answer ? 1 : 0,
+  };
+};
+
+const answerLength = async ({ outputs }) => {
+  return {
+    key: "answer_length",
+    score: outputs.answer.length,
+  };
+};
+
+const passRate = ({ runs }) => {
+  const passed = runs.filter(r => !r.error).length;
+  return {
+    key: "pass_rate",
+    score: passed / runs.length,
+  };
+};
+
+// Run evaluation
+const results = await evaluate(
+  myApp,
+  {
+    data: "my-dataset",
+    evaluators: [exactMatch, answerLength],
+    summaryEvaluators: [passRate],
+    experimentPrefix: "my-experiment",
+    description: "Testing my app",
+    metadata: { version: "1.0" },
+    maxConcurrency: 10,
+    client,
+  }
+);
+
+// Stream results
+for await (const result of results.results) {
+  console.log(result);
+}
+```

@@ -1,0 +1,397 @@
+---
+title: evaluate
+description: Evaluate a target system on a dataset with automated metrics
+---
+
+The `evaluate()` function runs experiments to test your LLM application against datasets, measuring performance with custom evaluators.
+
+## Basic usage
+
+```python
+from langsmith import evaluate
+
+def my_app(inputs: dict) -> dict:
+    # Your LLM application
+    return {"output": process(inputs["input"])}
+
+results = evaluate(
+    my_app,
+    data="my-dataset",
+    evaluators=[accuracy_evaluator],
+    experiment_prefix="baseline"
+)
+
+print(results.metrics)
+```
+
+## Parameters
+
+<ParamField path="target" type="Callable | Runnable | str | UUID | tuple" required>
+  The system to evaluate. Can be:
+  
+  - **Function**: `(dict) -> dict` or `(dict, dict) -> dict` (with example)
+  - **LangChain Runnable**: Any `Runnable` object
+  - **Experiment ID**: String or UUID of existing experiment
+  - **Tuple of experiment IDs**: For comparative evaluation
+  
+  ```python
+  # Function
+  def my_function(inputs):
+      return {"output": inputs["input"].upper()}
+  
+  evaluate(my_function, data="dataset")
+  
+  # LangChain Runnable
+  from langchain_core.runnables import RunnableLambda
+  
+  evaluate(RunnableLambda(lambda x: x), data="dataset")
+  
+  # Existing experiment
+  evaluate("abc-123", data="dataset", evaluators=[...])
+  
+  # Compare two experiments
+  evaluate(("exp-1", "exp-2"), evaluators=[comparison_evaluator])
+  ```
+</ParamField>
+
+<ParamField path="data" type="str | UUID | Iterable[Example] | Dataset">
+  Dataset to evaluate on. Can be:
+  
+  - **Dataset name** (string)
+  - **Dataset ID** (UUID)
+  - **List/iterator of examples**
+  - **Dataset object**
+  
+  ```python
+  # By name
+  evaluate(target, data="my-qa-dataset")
+  
+  # By ID
+  from uuid import UUID
+  evaluate(target, data=UUID("..."))
+  
+  # Inline examples
+  evaluate(target, data=[
+      {"inputs": {"question": "What is 2+2?"}, "outputs": {"answer": "4"}},
+      {"inputs": {"question": "What is 3+3?"}, "outputs": {"answer": "6"}}
+  ])
+  ```
+</ParamField>
+
+<ParamField path="evaluators" type="Sequence[EVALUATOR_T] | None">
+  List of evaluators to run on each example. Each evaluator receives the run and example.
+  
+  ```python
+  from langsmith import evaluate
+  from langsmith.evaluation import EvaluationResult
+  
+  def accuracy_evaluator(run, example):
+      prediction = run.outputs["output"]
+      reference = example.outputs["answer"]
+      return EvaluationResult(
+          key="accuracy",
+          score=1.0 if prediction == reference else 0.0
+      )
+  
+  evaluate(
+      target,
+      data="dataset",
+      evaluators=[accuracy_evaluator]
+  )
+  ```
+</ParamField>
+
+<ParamField path="summary_evaluators" type="Sequence[SUMMARY_EVALUATOR_T] | None">
+  Evaluators that run on the entire dataset after all examples are processed.
+  
+  ```python
+  def dataset_summary(runs, examples):
+      total = len(runs)
+      successful = sum(1 for r in runs if not r.error)
+      return EvaluationResult(
+          key="success_rate",
+          score=successful / total
+      )
+  
+  evaluate(
+      target,
+      data="dataset",
+      summary_evaluators=[dataset_summary]
+  )
+  ```
+</ParamField>
+
+<ParamField path="experiment_prefix" type="str | None">
+  Prefix for the experiment name. The full name will be `{prefix}-{hash}`.
+  
+  ```python
+  evaluate(
+      target,
+      data="dataset",
+      experiment_prefix="gpt-4-baseline"
+  )
+  # Creates experiment named "gpt-4-baseline-a1b2c3"
+  ```
+</ParamField>
+
+<ParamField path="description" type="str | None">
+  Free-form description of the experiment.
+  
+  ```python
+  evaluate(
+      target,
+      data="dataset",
+      description="Testing new prompt template with chain-of-thought"
+  )
+  ```
+</ParamField>
+
+<ParamField path="metadata" type="dict | None">
+  Metadata to attach to the experiment.
+  
+  ```python
+  evaluate(
+      target,
+      data="dataset",
+      metadata={
+          "model": "gpt-4",
+          "temperature": 0.7,
+          "version": "v2"
+      }
+  )
+  ```
+</ParamField>
+
+<ParamField path="max_concurrency" type="int | None">
+  Maximum number of concurrent evaluations. `0` for sequential, `None` for unlimited.
+  
+  ```python
+  # Run 10 examples concurrently
+  evaluate(
+      target,
+      data="dataset",
+      max_concurrency=10
+  )
+  ```
+</ParamField>
+
+<ParamField path="num_repetitions" type="int">
+  Number of times to run each example. Useful for testing variance. Default is `1`.
+  
+  ```python
+  # Run each example 3 times
+  evaluate(
+      target,
+      data="dataset",
+      num_repetitions=3
+  )
+  ```
+</ParamField>
+
+<ParamField path="client" type="Client | None">
+  LangSmith client to use. Uses default client if not provided.
+</ParamField>
+
+<ParamField path="blocking" type="bool">
+  Whether to block until evaluation completes. Default is `True`.
+  
+  ```python
+  # Non-blocking evaluation
+  results = evaluate(
+      target,
+      data="dataset",
+      blocking=False
+  )
+  # Continue other work...
+  results.wait()  # Block later
+  ```
+</ParamField>
+
+<ParamField path="upload_results" type="bool">
+  Whether to upload results to LangSmith. Default is `True`.
+</ParamField>
+
+<ParamField path="error_handling" type="Literal['log', 'ignore']">
+  How to handle errors in individual runs:
+  
+  - `"log"`: Include failed runs in results (default)
+  - `"ignore"`: Skip failed runs entirely
+  
+  ```python
+  evaluate(
+      target,
+      data="dataset",
+      error_handling="ignore"  # Skip failures
+  )
+  ```
+</ParamField>
+
+## Return value
+
+<ResponseField name="results" type="ExperimentResults">
+  Object containing experiment results and metrics.
+</ResponseField>
+
+### ExperimentResults properties
+
+```python
+results = evaluate(target, data="dataset", evaluators=[...])
+
+# Access metrics
+print(results.metrics)  # Aggregate scores
+
+# Get experiment info
+print(results.experiment_name)
+print(results.experiment_url)  # Link to view in UI
+
+# Access individual runs
+for run in results.runs:
+    print(run.id, run.outputs)
+
+# Wait for completion (if blocking=False)
+results.wait()
+```
+
+<ResponseField name="experiment_name" type="str">
+  Name of the created experiment.
+</ResponseField>
+
+<ResponseField name="experiment_url" type="str">
+  URL to view the experiment in the LangSmith UI.
+</ResponseField>
+
+<ResponseField name="metrics" type="dict[str, Any]">
+  Aggregated evaluation metrics (averages, counts, etc.).
+</ResponseField>
+
+<ResponseField name="runs" type="list[Run]">
+  List of all runs from the evaluation.
+</ResponseField>
+
+## Examples
+
+### Evaluate a function
+
+```python
+from langsmith import evaluate
+from langsmith.evaluation import EvaluationResult
+
+def qa_function(inputs: dict) -> dict:
+    # Your QA logic
+    return {"answer": generate_answer(inputs["question"])}
+
+def correctness_evaluator(run, example):
+    prediction = run.outputs.get("answer", "")
+    reference = example.outputs.get("answer", "")
+    
+    return EvaluationResult(
+        key="correctness",
+        score=1.0 if prediction.lower() == reference.lower() else 0.0
+    )
+
+results = evaluate(
+    qa_function,
+    data="qa-dataset",
+    evaluators=[correctness_evaluator],
+    experiment_prefix="baseline"
+)
+
+print(f"Accuracy: {results.metrics['correctness']}")
+```
+
+### Evaluate with LangChain
+
+```python
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langsmith import evaluate
+
+prompt = ChatPromptTemplate.from_template(
+    "Answer this question: {question}"
+)
+model = ChatOpenAI(model="gpt-3.5-turbo")
+chain = prompt | model
+
+evaluate(
+    chain,
+    data="qa-dataset",
+    evaluators=[correctness_evaluator],
+    experiment_prefix="gpt-3.5"
+)
+```
+
+### Compare experiments
+
+```python
+from langsmith import evaluate
+from langsmith.evaluation import ComparisonEvaluationResult
+
+def pairwise_evaluator(runs, example):
+    """Compare two runs and pick the better one."""
+    run_a, run_b = runs
+    
+    # Your comparison logic
+    better = run_a if len(run_a.outputs["answer"]) > len(run_b.outputs["answer"]) else run_b
+    
+    return ComparisonEvaluationResult(
+        key="preference",
+        scores={
+            run_a.id: 1.0 if better == run_a else 0.0,
+            run_b.id: 1.0 if better == run_b else 0.0
+        }
+    )
+
+# Compare two existing experiments
+results = evaluate(
+    ("experiment-1-id", "experiment-2-id"),
+    evaluators=[pairwise_evaluator]
+)
+```
+
+### Custom dataset inline
+
+```python
+evaluate(
+    my_function,
+    data=[
+        Example(
+            inputs={"query": "What is LangSmith?"},
+            outputs={"answer": "A platform for LLM development"}
+        ),
+        Example(
+            inputs={"query": "What is LangChain?"},
+            outputs={"answer": "A framework for LLM applications"}
+        )
+    ],
+    evaluators=[accuracy_evaluator]
+)
+```
+
+## evaluate_existing
+
+Re-evaluate an existing experiment with new evaluators.
+
+```python
+from langsmith import evaluate_existing
+
+# Run new evaluators on an existing experiment
+results = evaluate_existing(
+    "experiment-id-or-url",
+    evaluators=[new_evaluator],
+    summary_evaluators=[dataset_summary]
+)
+```
+
+<ParamField path="experiment" type="str | UUID" required>
+  ID or URL of the existing experiment.
+</ParamField>
+
+<ParamField path="evaluators" type="Sequence[EVALUATOR_T]">
+  Evaluators to run on the existing runs.
+</ParamField>
+
+<ParamField path="summary_evaluators" type="Sequence[SUMMARY_EVALUATOR_T]">
+  Summary evaluators for the dataset.
+</ParamField>
+
+See the [evaluators documentation](/python/evaluators) for details on creating custom evaluators.

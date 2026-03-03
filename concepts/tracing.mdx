@@ -1,0 +1,352 @@
+---
+title: Tracing
+description: Understand how LangSmith captures execution traces of your LLM applications
+---
+
+Tracing is the foundation of observability in LangSmith. It captures the execution flow of your LLM applications as hierarchical trees of runs, allowing you to debug, monitor, and optimize your applications.
+
+## What is a trace?
+
+A trace represents the complete execution path of a request through your application. It's composed of individual **runs**, which are units of work like LLM calls, tool invocations, or chain executions. Each run can have child runs, forming a tree structure that reflects your application's execution hierarchy.
+
+```
+Trace (Root Run)
+├── Chain Run
+│   ├── LLM Run
+│   └── Tool Run
+│       └── Retriever Run
+└── Parser Run
+```
+
+## Run types
+
+LangSmith supports several run types to categorize different operations in your application:
+
+- **`llm`** - Large language model calls (e.g., OpenAI, Anthropic)
+- **`chain`** - Sequences of operations or workflows
+- **`tool`** - Function or tool invocations
+- **`retriever`** - Document retrieval operations
+- **`embedding`** - Text embedding generation
+- **`prompt`** - Prompt formatting or templating
+- **`parser`** - Output parsing operations
+
+<Note>
+While these are the most common types, you can use any string value for `run_type` to suit your application's needs.
+</Note>
+
+## Creating traces
+
+### Using the `@traceable` decorator
+
+The simplest way to create traces is with the `@traceable` decorator:
+
+<CodeGroup>
+```python Python
+from langsmith import traceable
+
+@traceable(run_type="llm")
+def call_llm(prompt: str) -> str:
+    # Your LLM call logic
+    return "response"
+
+@traceable(run_type="chain")
+def my_workflow(user_input: str) -> str:
+    # This creates a parent run
+    result = call_llm(user_input)  # This creates a child run
+    return result
+
+# When called, this automatically creates a trace
+my_workflow("Hello, world!")
+```
+
+```typescript TypeScript
+import { traceable } from "langsmith/traceable";
+
+const callLLM = traceable(
+  async (prompt: string) => {
+    // Your LLM call logic
+    return "response";
+  },
+  { name: "call_llm", run_type: "llm" }
+);
+
+const myWorkflow = traceable(
+  async (userInput: string) => {
+    // This creates a parent run
+    const result = await callLLM(userInput); // This creates a child run
+    return result;
+  },
+  { name: "my_workflow", run_type: "chain" }
+);
+
+// When called, this automatically creates a trace
+await myWorkflow("Hello, world!");
+```
+</CodeGroup>
+
+### Using RunTree directly
+
+For more control, you can use the `RunTree` class:
+
+<CodeGroup>
+```python Python
+from langsmith.run_trees import RunTree
+
+# Create a root run
+run = RunTree(
+    name="my_application",
+    run_type="chain",
+    inputs={"query": "What is LangSmith?"},
+)
+
+# Create a child run
+child = run.create_child(
+    name="llm_call",
+    run_type="llm",
+    inputs={"prompt": "What is LangSmith?"},
+)
+
+# End the child run
+child.end(outputs={"response": "LangSmith is a platform..."})
+
+# End the parent run
+run.end(outputs={"answer": "LangSmith is a platform..."})
+
+# Post to LangSmith
+run.post()
+```
+
+```typescript TypeScript
+import { RunTree } from "langsmith";
+
+// Create a root run
+const run = new RunTree({
+  name: "my_application",
+  run_type: "chain",
+  inputs: { query: "What is LangSmith?" },
+});
+
+// Create a child run
+const child = run.createChild({
+  name: "llm_call",
+  run_type: "llm",
+  inputs: { prompt: "What is LangSmith?" },
+});
+
+// End the child run
+await child.end({ response: "LangSmith is a platform..." });
+
+// End the parent run
+await run.end({ answer: "LangSmith is a platform..." });
+
+// Post to LangSmith
+await run.postRun();
+```
+</CodeGroup>
+
+## Run properties
+
+Each run captures comprehensive information about the execution:
+
+- **`id`** - Unique identifier (UUID v7, time-ordered)
+- **`name`** - Human-readable name for the run
+- **`run_type`** - Category of the operation
+- **`inputs`** - Input data passed to the operation
+- **`outputs`** - Output data produced by the operation
+- **`start_time`** / **`end_time`** - Execution timing
+- **`error`** - Error message if the run failed
+- **`tags`** - Labels for filtering and organization
+- **`metadata`** - Additional context and information
+- **`trace_id`** - ID of the root run in the trace
+- **`parent_run_id`** - ID of the parent run
+- **`dotted_order`** - Hierarchical ordering string
+
+## Trace organization with dotted order
+
+LangSmith uses a **dotted order** system to maintain the execution sequence of runs within a trace. This ensures traces are displayed in the correct chronological order.
+
+### Dotted order format
+
+The dotted order is a string composed of timestamp and UUID segments separated by dots:
+
+```
+20230914T223155647Z1b64098b-4ab7-43f6-afee-992304f198d8
+```
+
+For child runs, the parent's dotted order is prepended:
+
+```
+Parent: 20230914T223155647Z1b64098b-4ab7-43f6-afee-992304f198d8
+
+Child 1: 20230914T223155647Z1b64098b-4ab7-43f6-afee-992304f198d8.20230914T223155649Z809ed3a2-0172-4f4d-8a02-a64e9b7a0f8a
+
+Child 2: 20230914T223155647Z1b64098b-4ab7-43f6-afee-992304f198d8.20230914T223155650Zc8d9f4c5-6c5a-4b2d-9b1c-3d9d7a7c5c7c
+```
+
+This allows traces to be sorted and displayed in execution order, even when runs arrive at the server out of order.
+
+## Adding metadata and tags
+
+Enrich your traces with additional context:
+
+<CodeGroup>
+```python Python
+@traceable(
+    run_type="chain",
+    tags=["production", "experiment-v2"],
+    metadata={"user_id": "123", "version": "2.0"}
+)
+def my_function(input: str):
+    return process(input)
+
+# Or add dynamically during execution
+from langsmith import get_current_run_tree
+
+@traceable(run_type="chain")
+def my_function(input: str):
+    run = get_current_run_tree()
+    run.add_tags(["dynamic-tag"])
+    run.add_metadata({"custom_field": "value"})
+    return process(input)
+```
+
+```typescript TypeScript
+import { traceable, getCurrentRunTree } from "langsmith/traceable";
+
+const myFunction = traceable(
+  (input: string) => {
+    return process(input);
+  },
+  {
+    name: "my_function",
+    run_type: "chain",
+    tags: ["production", "experiment-v2"],
+    metadata: { user_id: "123", version: "2.0" },
+  }
+);
+
+// Or add dynamically during execution
+const myDynamicFunction = traceable(
+  (input: string) => {
+    const run = getCurrentRunTree();
+    run.tags = [...(run.tags || []), "dynamic-tag"];
+    run.metadata = { ...run.metadata, custom_field: "value" };
+    return process(input);
+  },
+  { name: "my_dynamic_function", run_type: "chain" }
+);
+```
+</CodeGroup>
+
+## Distributed tracing
+
+For distributed systems (e.g., microservices), you can propagate trace context across process boundaries using headers:
+
+<CodeGroup>
+```python Python
+from langsmith.run_trees import RunTree
+
+# Service A: Create a run and export headers
+run = RunTree(name="service_a", run_type="chain", inputs={"data": "value"})
+headers = run.to_headers()
+
+# Pass headers to Service B (e.g., via HTTP)
+# headers = {"langsmith-trace": "...", "baggage": "..."}
+
+# Service B: Continue the trace from headers
+parent_run = RunTree.from_headers(headers)
+child_run = parent_run.create_child(
+    name="service_b",
+    run_type="tool",
+    inputs={"received": "data"}
+)
+```
+
+```typescript TypeScript
+import { RunTree } from "langsmith";
+
+// Service A: Create a run and export headers
+const run = new RunTree({
+  name: "service_a",
+  run_type: "chain",
+  inputs: { data: "value" },
+});
+const headers = run.toHeaders();
+
+// Pass headers to Service B (e.g., via HTTP)
+// headers = { "langsmith-trace": "...", "baggage": "..." }
+
+// Service B: Continue the trace from headers
+const parentRun = RunTree.fromHeaders(headers);
+const childRun = parentRun.createChild({
+  name: "service_b",
+  run_type: "tool",
+  inputs: { received: "data" },
+});
+```
+</CodeGroup>
+
+<Tip>
+The baggage header propagates metadata, tags, and project names across distributed traces.
+</Tip>
+
+## Error handling
+
+When an error occurs, it's automatically captured in the trace:
+
+<CodeGroup>
+```python Python
+@traceable(run_type="llm")
+def call_llm(prompt: str):
+    try:
+        # LLM call that might fail
+        return llm.generate(prompt)
+    except Exception as e:
+        # Error is automatically captured by @traceable
+        raise
+
+# Or manually set error information
+run = RunTree(name="my_run", run_type="llm", inputs={"prompt": "test"})
+try:
+    result = risky_operation()
+    run.end(outputs={"result": result})
+except Exception as e:
+    run.end(error=str(e))
+run.post()
+```
+
+```typescript TypeScript
+const callLLM = traceable(
+  async (prompt: string) => {
+    try {
+      // LLM call that might fail
+      return await llm.generate(prompt);
+    } catch (error) {
+      // Error is automatically captured by traceable
+      throw error;
+    }
+  },
+  { name: "call_llm", run_type: "llm" }
+);
+
+// Or manually set error information
+const run = new RunTree({
+  name: "my_run",
+  run_type: "llm",
+  inputs: { prompt: "test" },
+});
+try {
+  const result = await riskyOperation();
+  await run.end({ result });
+} catch (error) {
+  await run.end(undefined, String(error));
+}
+await run.postRun();
+```
+</CodeGroup>
+
+## Next steps
+
+- Learn about [RunTree structure](/concepts/run-trees) for advanced tracing patterns
+- Explore [evaluation](/concepts/evaluation) to assess trace quality
+- Understand [datasets](/concepts/datasets) for organizing test cases

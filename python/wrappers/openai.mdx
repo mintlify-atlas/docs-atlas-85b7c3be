@@ -1,0 +1,335 @@
+---
+title: wrap_openai
+description: Automatic tracing for OpenAI API calls
+---
+
+The `wrap_openai()` function wraps an OpenAI client to automatically trace all API calls to LangSmith.
+
+## Basic usage
+
+```python
+from langsmith import wrappers
+import openai
+
+# Wrap the OpenAI client
+client = wrappers.wrap_openai(openai.Client())
+
+# All API calls are now automatically traced
+response = client.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+## Function signature
+
+```python
+def wrap_openai(
+    client: OpenAI | AsyncOpenAI,
+    *,
+    project_name: str | None = None,
+    tags: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+    client_: Client | None = None
+) -> OpenAI | AsyncOpenAI:
+    ...
+```
+
+### Parameters
+
+<ParamField path="client" type="OpenAI | AsyncOpenAI" required>
+  The OpenAI client instance to wrap. Can be sync or async.
+  
+  ```python
+  import openai
+  
+  # Sync client
+  client = wrappers.wrap_openai(openai.Client())
+  
+  # Async client
+  async_client = wrappers.wrap_openai(openai.AsyncClient())
+  ```
+</ParamField>
+
+<ParamField path="project_name" type="str | None">
+  LangSmith project to log traces to.
+  
+  ```python
+  client = wrappers.wrap_openai(
+      openai.Client(),
+      project_name="openai-traces"
+  )
+  ```
+</ParamField>
+
+<ParamField path="tags" type="list[str] | None">
+  Tags to attach to all traces from this client.
+  
+  ```python
+  client = wrappers.wrap_openai(
+      openai.Client(),
+      tags=["production", "gpt-4"]
+  )
+  ```
+</ParamField>
+
+<ParamField path="metadata" type="dict[str, Any] | None">
+  Metadata to attach to all traces.
+  
+  ```python
+  client = wrappers.wrap_openai(
+      openai.Client(),
+      metadata={"environment": "prod", "team": "ml"}
+  )
+  ```
+</ParamField>
+
+<ParamField path="client_" type="Client | None">
+  Custom LangSmith client to use for tracing.
+  
+  ```python
+  from langsmith import Client
+  
+  ls_client = Client(api_key="...")
+  oai_client = wrappers.wrap_openai(
+      openai.Client(),
+      client_=ls_client
+  )
+  ```
+</ParamField>
+
+<ResponseField name="return" type="OpenAI | AsyncOpenAI">
+  The wrapped client with tracing enabled.
+</ResponseField>
+
+## What gets traced
+
+The wrapper automatically traces:
+
+- **Chat completions**: `client.chat.completions.create()`
+- **Completions**: `client.completions.create()`
+- **Streaming responses**: Both sync and async streaming
+- **Token usage**: Input/output tokens and cache statistics
+- **Model parameters**: Temperature, max_tokens, etc.
+- **Error handling**: Failed requests are traced with error info
+
+## Examples
+
+### Basic chat completion
+
+```python
+from langsmith import wrappers
+import openai
+
+client = wrappers.wrap_openai(openai.Client())
+
+response = client.chat.completions.create(
+    model="gpt-4",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "What is LangSmith?"}
+    ],
+    temperature=0.7
+)
+
+print(response.choices[0].message.content)
+# Automatically traced to LangSmith with full details
+```
+
+### Streaming responses
+
+```python
+client = wrappers.wrap_openai(openai.Client())
+
+stream = client.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "Count to 5"}],
+    stream=True
+)
+
+for chunk in stream:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+# Full stream is collected and traced
+```
+
+### Async client
+
+```python
+import asyncio
+from langsmith import wrappers
+import openai
+
+async_client = wrappers.wrap_openai(openai.AsyncClient())
+
+async def generate():
+    response = await async_client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": "Hello!"}]
+    )
+    return response.choices[0].message.content
+
+result = asyncio.run(generate())
+```
+
+### Async streaming
+
+```python
+async_client = wrappers.wrap_openai(openai.AsyncClient())
+
+async def stream_generate():
+    stream = await async_client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": "Write a poem"}],
+        stream=True
+    )
+    
+    async for chunk in stream:
+        if chunk.choices[0].delta.content:
+            print(chunk.choices[0].delta.content, end="")
+
+await stream_generate()
+```
+
+### Within traced functions
+
+```python
+from langsmith import traceable, wrappers
+import openai
+
+client = wrappers.wrap_openai(openai.Client())
+
+@traceable
+def answer_question(question: str) -> str:
+    # OpenAI call is traced as a child of answer_question
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": question}]
+    )
+    return response.choices[0].message.content
+
+answer = answer_question("What is 2+2?")
+# Creates nested trace: answer_question > chat completion
+```
+
+### Tool/function calling
+
+```python
+client = wrappers.wrap_openai(openai.Client())
+
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get the weather for a location",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string"}
+                },
+                "required": ["location"]
+            }
+        }
+    }
+]
+
+response = client.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "What's the weather in SF?"}],
+    tools=tools
+)
+
+# Tool calls are traced with full details
+if response.choices[0].message.tool_calls:
+    print(response.choices[0].message.tool_calls[0].function)
+```
+
+### Azure OpenAI
+
+Works with Azure OpenAI clients:
+
+```python
+from openai import AzureOpenAI
+from langsmith import wrappers
+
+azure_client = AzureOpenAI(
+    api_key="your-key",
+    api_version="2023-12-01-preview",
+    azure_endpoint="https://your-resource.openai.azure.com"
+)
+
+wrapped_client = wrappers.wrap_openai(azure_client)
+
+response = wrapped_client.chat.completions.create(
+    model="gpt-4",  # Your deployment name
+    messages=[{"role": "user", "content": "Hello"}]
+)
+```
+
+## Captured metadata
+
+The wrapper automatically captures:
+
+- **Model name**: e.g., `"gpt-4"`, `"gpt-3.5-turbo"`
+- **Provider**: `"openai"`
+- **Model type**: `"chat"` or `"llm"`
+- **Temperature**: If specified
+- **Max tokens**: `max_tokens`, `max_completion_tokens`, etc.
+- **Stop sequences**: If specified
+- **Token usage**: Including cache read/write statistics
+- **Invocation parameters**: All request parameters (filtered for safety)
+
+## Integration with testing
+
+Use with `@test` decorator for cached testing:
+
+```python
+import pytest
+from langsmith import test, wrappers
+import openai
+
+# Set LANGSMITH_TEST_CACHE=tests/cassettes
+
+client = wrappers.wrap_openai(openai.Client())
+
+@test(cached_hosts=["api.openai.com"])
+def test_openai_response():
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "Say hello"}]
+    )
+    
+    assert "hello" in response.choices[0].message.content.lower()
+    # First run: real API call (cached)
+    # Subsequent runs: instant (from cache)
+```
+
+## Best practices
+
+1. **Wrap once at initialization**: Don't wrap repeatedly
+   ```python
+   # Good
+   client = wrappers.wrap_openai(openai.Client())
+   
+   # Bad
+   def my_function():
+       client = wrappers.wrap_openai(openai.Client())  # Don't do this
+   ```
+
+2. **Use with environment variables**: Configure globally
+   ```python
+   import os
+   os.environ["LANGCHAIN_PROJECT"] = "my-project"
+   
+   client = wrappers.wrap_openai(openai.Client())
+   # Uses project from environment
+   ```
+
+3. **Combine with @traceable**: For nested traces
+   ```python
+   @traceable
+   def my_pipeline(input: str):
+       result = client.chat.completions.create(...)  # Traced as child
+       return result
+   ```

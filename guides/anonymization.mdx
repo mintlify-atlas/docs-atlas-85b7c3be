@@ -1,0 +1,485 @@
+---
+title: Data anonymization
+description: Redact sensitive information from traces before sending to LangSmith
+---
+
+The LangSmith SDK provides utilities to anonymize sensitive data in traces. Use the `createAnonymizer` function to automatically redact PII, secrets, and other sensitive information before it's sent to LangSmith.
+
+## How it works
+
+The anonymizer:
+
+1. Extracts all string values from your data (inputs, outputs, metadata)
+2. Applies rules or custom functions to detect and replace sensitive patterns
+3. Reconstructs the data structure with redacted values
+
+All data structures (nested objects, arrays) are preserved - only string values are modified.
+
+## Basic usage with regex patterns
+
+Define patterns to match and redact:
+
+<CodeGroup>
+
+```python Python
+from langsmith.anonymizer import create_anonymizer
+import re
+
+# Define rules for redaction
+anonymizer = create_anonymizer(
+    [
+        {"pattern": re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I), "replace": "[email]"},
+        {"pattern": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "replace": "[ssn]"},
+        {"pattern": re.compile(r"sk-[a-zA-Z0-9]{32,}"), "replace": "[api-key]"},
+    ]
+)
+
+# Apply to data
+data = {
+    "message": "Contact john@example.com for API key sk-abc123xyz456",
+    "ssn": "123-45-6789"
+}
+
+redacted = anonymizer(data)
+print(redacted)
+# Output:
+# {
+#   "message": "Contact [email] for API key [api-key]",
+#   "ssn": "[ssn]"
+# }
+```
+
+```typescript TypeScript
+import { createAnonymizer } from "langsmith/anonymizer";
+
+// Define rules for redaction
+const anonymizer = createAnonymizer([
+  { pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, replace: "[email]" },
+  { pattern: /\b\d{3}-\d{2}-\d{4}\b/g, replace: "[ssn]" },
+  { pattern: /sk-[a-zA-Z0-9]{32,}/g, replace: "[api-key]" },
+]);
+
+// Apply to data
+const data = {
+  message: "Contact john@example.com for API key sk-abc123xyz456",
+  ssn: "123-45-6789"
+};
+
+const redacted = anonymizer(data);
+console.log(redacted);
+// Output:
+// {
+//   message: "Contact [email] for API key [api-key]",
+//   ssn: "[ssn]"
+// }
+```
+
+</CodeGroup>
+
+## Using with traceable
+
+Integrate anonymization into your tracing workflow:
+
+<CodeGroup>
+
+```python Python
+from langsmith import traceable
+from langsmith.anonymizer import create_anonymizer
+import re
+
+# Create anonymizer
+anonymizer = create_anonymizer(
+    [
+        {"pattern": re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I), "replace": "[email]"},
+        {"pattern": re.compile(r"\d{16}"), "replace": "[credit-card]"},
+    ]
+)
+
+@traceable(
+    process_inputs=anonymizer,
+    process_outputs=anonymizer
+)
+def process_user_data(user_input: dict) -> dict:
+    # Process data - sensitive info is redacted in traces
+    response = {
+        "message": f"Processed request from {user_input['email']}",
+        "payment": user_input.get("card")
+    }
+    return response
+
+# Sensitive data in traces will be redacted
+result = process_user_data({
+    "email": "alice@example.com",
+    "card": "1234567890123456"
+})
+```
+
+```typescript TypeScript
+import { traceable } from "langsmith/traceable";
+import { createAnonymizer } from "langsmith/anonymizer";
+
+// Create anonymizer
+const anonymizer = createAnonymizer([
+  { pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, replace: "[email]" },
+  { pattern: /\d{16}/g, replace: "[credit-card]" },
+]);
+
+const processUserData = traceable(
+  (userInput: any): any => {
+    // Process data - sensitive info is redacted in traces
+    return {
+      message: `Processed request from ${userInput.email}`,
+      payment: userInput.card
+    };
+  },
+  {
+    name: "process_user_data",
+    processInputs: anonymizer,
+    processOutputs: anonymizer
+  }
+);
+
+// Sensitive data in traces will be redacted
+const result = await processUserData({
+  email: "alice@example.com",
+  card: "1234567890123456"
+});
+```
+
+</CodeGroup>
+
+## Custom anonymizer function
+
+Use a custom function for complex logic:
+
+<CodeGroup>
+
+```python Python
+from langsmith.anonymizer import create_anonymizer
+
+def custom_redactor(value: str, path: list) -> str:
+    """Custom function to redact based on value and path."""
+    # Redact based on field path
+    if "password" in path or "secret" in path:
+        return "[redacted]"
+    
+    # Redact phone numbers
+    if len(value) == 10 and value.isdigit():
+        return "[phone]"
+    
+    # Redact credit cards (basic check)
+    if len(value) == 16 and value.isdigit():
+        return "[credit-card]"
+    
+    return value
+
+anonymizer = create_anonymizer(custom_redactor)
+
+data = {
+    "user": {
+        "name": "Alice",
+        "password": "super-secret-123",
+        "phone": "5551234567"
+    },
+    "payment": "1234567890123456"
+}
+
+redacted = anonymizer(data)
+print(redacted)
+# Output:
+# {
+#   "user": {
+#     "name": "Alice",
+#     "password": "[redacted]",
+#     "phone": "[phone]"
+#   },
+#   "payment": "[credit-card]"
+# }
+```
+
+```typescript TypeScript
+import { createAnonymizer } from "langsmith/anonymizer";
+
+function customRedactor(value: string, path?: string): string {
+  // Redact based on field path
+  if (path && (path.includes("password") || path.includes("secret"))) {
+    return "[redacted]";
+  }
+  
+  // Redact phone numbers
+  if (value.length === 10 && /^\d+$/.test(value)) {
+    return "[phone]";
+  }
+  
+  // Redact credit cards (basic check)
+  if (value.length === 16 && /^\d+$/.test(value)) {
+    return "[credit-card]";
+  }
+  
+  return value;
+}
+
+const anonymizer = createAnonymizer(customRedactor);
+
+const data = {
+  user: {
+    name: "Alice",
+    password: "super-secret-123",
+    phone: "5551234567"
+  },
+  payment: "1234567890123456"
+};
+
+const redacted = anonymizer(data);
+console.log(redacted);
+// Output:
+// {
+//   user: {
+//     name: "Alice",
+//     password: "[redacted]",
+//     phone: "[phone]"
+//   },
+//   payment: "[credit-card]"
+// }
+```
+
+</CodeGroup>
+
+## Common patterns
+
+Here are ready-to-use patterns for common sensitive data:
+
+<CodeGroup>
+
+```python Python
+import re
+from langsmith.anonymizer import create_anonymizer
+
+# Common PII patterns
+common_patterns = [
+    # Email addresses
+    {"pattern": re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I), "replace": "[email]"},
+    
+    # Phone numbers (US format)
+    {"pattern": re.compile(r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b"), "replace": "[phone]"},
+    
+    # Social Security Numbers
+    {"pattern": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "replace": "[ssn]"},
+    
+    # Credit card numbers (basic)
+    {"pattern": re.compile(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"), "replace": "[credit-card]"},
+    
+    # API keys (common formats)
+    {"pattern": re.compile(r"sk-[a-zA-Z0-9]{32,}"), "replace": "[api-key]"},
+    {"pattern": re.compile(r"[a-zA-Z0-9_-]{32,}"), "replace": "[token]"},
+    
+    # IP addresses
+    {"pattern": re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "replace": "[ip]"},
+    
+    # URLs with credentials
+    {"pattern": re.compile(r"https?://[^:]+:[^@]+@"), "replace": "https://[credentials]@"},
+]
+
+anonymizer = create_anonymizer(common_patterns)
+```
+
+```typescript TypeScript
+import { createAnonymizer } from "langsmith/anonymizer";
+
+// Common PII patterns
+const commonPatterns = [
+  // Email addresses
+  { pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, replace: "[email]" },
+  
+  // Phone numbers (US format)
+  { pattern: /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g, replace: "[phone]" },
+  
+  // Social Security Numbers
+  { pattern: /\b\d{3}-\d{2}-\d{4}\b/g, replace: "[ssn]" },
+  
+  // Credit card numbers (basic)
+  { pattern: /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g, replace: "[credit-card]" },
+  
+  // API keys (common formats)
+  { pattern: /sk-[a-zA-Z0-9]{32,}/g, replace: "[api-key]" },
+  { pattern: /[a-zA-Z0-9_-]{32,}/g, replace: "[token]" },
+  
+  // IP addresses
+  { pattern: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g, replace: "[ip]" },
+  
+  // URLs with credentials
+  { pattern: /https?:\/\/[^:]+:[^@]+@/g, replace: "https://[credentials]@" },
+];
+
+const anonymizer = createAnonymizer(commonPatterns);
+```
+
+</CodeGroup>
+
+## Controlling traversal depth
+
+Limit how deep the anonymizer traverses nested objects:
+
+<CodeGroup>
+
+```python Python
+from langsmith.anonymizer import create_anonymizer
+import re
+
+anonymizer = create_anonymizer(
+    [{"pattern": re.compile(r"secret", re.I), "replace": "[redacted]"}],
+    max_depth=5  # Only traverse 5 levels deep
+)
+
+data = {
+    "level1": {
+        "level2": {
+            "level3": {
+                "level4": {
+                    "level5": {
+                        "level6": "secret data"  # May not be redacted if max_depth=5
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+```typescript TypeScript
+import { createAnonymizer } from "langsmith/anonymizer";
+
+const anonymizer = createAnonymizer(
+  [{ pattern: /secret/gi, replace: "[redacted]" }],
+  { maxDepth: 5 }  // Only traverse 5 levels deep
+);
+
+const data = {
+  level1: {
+    level2: {
+      level3: {
+        level4: {
+          level5: {
+            level6: "secret data"  // May not be redacted if maxDepth=5
+          }
+        }
+      }
+    }
+  }
+};
+```
+
+</CodeGroup>
+
+## Advanced: Custom node processor
+
+For maximum control, implement a custom `StringNodeProcessor`:
+
+<CodeGroup>
+
+```python Python
+from langsmith.anonymizer import create_anonymizer, StringNodeProcessor, StringNode
+from typing import Any
+
+class CustomProcessor(StringNodeProcessor):
+    def mask_nodes(self, nodes: list[StringNode]) -> list[StringNode]:
+        """Process all string nodes at once."""
+        result = []
+        for node in nodes:
+            value = node["value"]
+            path = node["path"]
+            
+            # Custom logic
+            if "email" in str(path).lower():
+                result.append({"value": "[email]", "path": path})
+            elif len(value) > 100:
+                result.append({"value": value[:50] + "...[truncated]", "path": path})
+        
+        return result
+
+anonymizer = create_anonymizer(CustomProcessor())
+```
+
+```typescript TypeScript
+import { createAnonymizer, StringNodeProcessor, StringNode } from "langsmith/anonymizer";
+
+class CustomProcessor implements StringNodeProcessor {
+  maskNodes(nodes: StringNode[]): StringNode[] {
+    const result: StringNode[] = [];
+    
+    for (const node of nodes) {
+      const { value, path } = node;
+      
+      // Custom logic
+      if (path.toLowerCase().includes("email")) {
+        result.push({ value: "[email]", path });
+      } else if (value.length > 100) {
+        result.push({ value: value.slice(0, 50) + "...[truncated]", path });
+      }
+    }
+    
+    return result;
+  }
+}
+
+const anonymizer = createAnonymizer(new CustomProcessor());
+```
+
+</CodeGroup>
+
+## Best practices
+
+<Steps>
+
+### Start with common patterns
+
+Use the ready-made patterns for emails, phones, SSNs, and API keys as a baseline.
+
+### Test your anonymizer
+
+Validate that sensitive data is actually being redacted:
+
+```python
+test_data = {"email": "test@example.com", "secret": "sk-abc123"}
+redacted = anonymizer(test_data)
+assert "test@example.com" not in str(redacted)
+assert "sk-abc123" not in str(redacted)
+```
+
+### Be cautious with overly broad patterns
+
+Avoid patterns that might redact too much:
+
+```python
+# Bad: Matches almost any string
+{"pattern": re.compile(r"[a-zA-Z0-9]+"), "replace": "[redacted]"}
+
+# Good: Specific pattern
+{"pattern": re.compile(r"sk-[a-zA-Z0-9]{32,}"), "replace": "[api-key]"}
+```
+
+### Use different labels for different types
+
+Make it clear what was redacted:
+
+```python
+"[email]", "[ssn]", "[api-key]", "[credit-card]"
+# Not just "[redacted]" for everything
+```
+
+### Consider performance
+
+For high-volume tracing, keep patterns efficient and limit `max_depth`.
+
+</Steps>
+
+## Important notes
+
+<Warning>
+Anonymization happens **client-side** before data is sent to LangSmith. Once data is sent without anonymization, it cannot be retroactively redacted.
+</Warning>
+
+- The anonymizer only processes **string values** - other types (numbers, booleans) are unchanged
+- Nested objects and arrays are preserved - structure is maintained
+- Regex patterns should use the `g` (global) flag to replace all occurrences
+- Python uses `re.compile()` while TypeScript uses regex literals

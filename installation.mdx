@@ -1,0 +1,287 @@
+---
+title: Installation
+description: Install the LangSmith SDK for Python or TypeScript
+---
+
+The LangSmith SDK is available as a Python package on PyPI and as a TypeScript/JavaScript package on npm.
+
+## Prerequisites
+
+Before installing the SDK, you'll need:
+
+1. A LangSmith account - [sign up here](https://smith.langchain.com/)
+2. A LangSmith API key from your [Settings page](https://smith.langchain.com/settings)
+
+<Warning>
+  Save your API key in a secure location. It will not be shown again after creation.
+</Warning>
+
+## Python installation
+
+<Steps>
+  <Step title="Install the package">
+    Install the LangSmith SDK using pip:
+    
+    ```bash
+    pip install -U langsmith
+    ```
+    
+    The SDK requires Python 3.10 or higher.
+  </Step>
+  
+  <Step title="Set environment variables">
+    Configure your environment with your LangSmith credentials:
+    
+    ```bash
+    export LANGSMITH_TRACING=true
+    export LANGSMITH_API_KEY=ls_...
+    # Optional: specify a project name (defaults to "default")
+    export LANGSMITH_PROJECT=my-project
+    # Required for organization-scoped API keys
+    export LANGSMITH_WORKSPACE_ID=<your-workspace-id>
+    ```
+    
+    <Tip>
+      Add these to your `.bashrc`, `.zshrc`, or `.env` file to persist across sessions.
+    </Tip>
+  </Step>
+  
+  <Step title="Verify installation">
+    Test that everything is working:
+    
+    ```python
+    from langsmith import Client
+    
+    client = Client()
+    print("LangSmith SDK installed successfully!")
+    print(f"Connected to: {client.api_url}")
+    ```
+  </Step>
+</Steps>
+
+### Python optional dependencies
+
+The SDK supports optional features that require additional packages:
+
+```bash
+# OpenTelemetry integration
+pip install langsmith[otel]
+
+# Pytest integration
+pip install langsmith[pytest]
+
+# VCR (record/replay HTTP interactions)
+pip install langsmith[vcr]
+
+# Sandbox execution environment
+pip install langsmith[sandbox]
+
+# OpenAI Agents SDK support
+pip install langsmith[openai-agents]
+
+# Anthropic Claude Agent SDK support
+pip install langsmith[claude-agent-sdk]
+
+# Google ADK support
+pip install langsmith[google-adk]
+```
+
+## TypeScript installation
+
+<Steps>
+  <Step title="Install the package">
+    Install the LangSmith SDK using your preferred package manager:
+    
+    <CodeGroup>
+    ```bash npm
+    npm install langsmith
+    ```
+    
+    ```bash yarn
+    yarn add langsmith
+    ```
+    
+    ```bash pnpm
+    pnpm add langsmith
+    ```
+    </CodeGroup>
+    
+    The SDK works with Node.js, Deno, and modern browsers.
+  </Step>
+  
+  <Step title="Set environment variables">
+    Configure your environment with your LangSmith credentials:
+    
+    ```bash
+    export LANGSMITH_TRACING=true
+    export LANGSMITH_API_KEY=ls_...
+    # Optional: specify a project name (defaults to "default")
+    export LANGSMITH_PROJECT=my-project
+    # Required for organization-scoped API keys
+    export LANGSMITH_WORKSPACE_ID=<your-workspace-id>
+    ```
+    
+    For EU region users:
+    ```bash
+    export LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com
+    ```
+  </Step>
+  
+  <Step title="Verify installation">
+    Test that everything is working:
+    
+    ```typescript
+    import { Client } from "langsmith";
+    
+    const client = new Client();
+    console.log("LangSmith SDK installed successfully!");
+    console.log(`Connected to: ${client.apiUrl}`);
+    ```
+  </Step>
+</Steps>
+
+### TypeScript peer dependencies
+
+Some features require peer dependencies:
+
+```bash
+# For OpenAI wrapper
+npm install openai
+
+# For OpenTelemetry integration
+npm install @opentelemetry/api @opentelemetry/sdk-trace-base
+```
+
+## Configuration options
+
+You can configure the SDK using environment variables or constructor options.
+
+### Environment variables
+
+<ParamField path="LANGSMITH_TRACING" type="boolean" default="false">
+  Enable or disable tracing globally
+</ParamField>
+
+<ParamField path="LANGSMITH_API_KEY" type="string" required>
+  Your LangSmith API key (starts with `ls_`)
+</ParamField>
+
+<ParamField path="LANGSMITH_PROJECT" type="string" default="default">
+  The project name where traces will be logged
+</ParamField>
+
+<ParamField path="LANGSMITH_ENDPOINT" type="string" default="https://api.smith.langchain.com">
+  The LangSmith API endpoint. Use `https://eu.api.smith.langchain.com` for EU region.
+</ParamField>
+
+<ParamField path="LANGSMITH_WORKSPACE_ID" type="string">
+  Your workspace ID (required for organization-scoped API keys)
+</ParamField>
+
+### Programmatic configuration
+
+You can also configure the client programmatically:
+
+<CodeGroup>
+```python Python
+from langsmith import Client
+
+client = Client(
+    api_key="ls_...",
+    api_url="https://api.smith.langchain.com",
+    project_name="my-project"
+)
+```
+
+```typescript TypeScript
+import { Client } from "langsmith";
+
+const client = new Client({
+  apiKey: "ls_...",
+  apiUrl: "https://api.smith.langchain.com",
+  projectName: "my-project"
+});
+```
+</CodeGroup>
+
+## Region support
+
+LangSmith is available in multiple regions:
+
+<Tabs>
+  <Tab title="US (Default)">
+    ```bash
+    export LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+    ```
+    
+    This is the default endpoint and does not need to be set explicitly.
+  </Tab>
+  
+  <Tab title="EU">
+    ```bash
+    export LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com
+    ```
+    
+    Set this if you signed up with the EU region.
+  </Tab>
+</Tabs>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Import errors" icon="circle-exclamation">
+    If you see import errors, make sure you've installed the package and are using the correct Python version (3.10+):
+    
+    ```bash
+    python --version  # Should be 3.10 or higher
+    pip list | grep langsmith
+    ```
+  </Accordion>
+  
+  <Accordion title="Authentication errors" icon="key">
+    If you see "Unauthorized" errors:
+    
+    1. Verify your API key starts with `ls_`
+    2. Check that `LANGSMITH_API_KEY` is set: `echo $LANGSMITH_API_KEY`
+    3. If using an org-scoped key, ensure `LANGSMITH_WORKSPACE_ID` is set
+    4. Verify your key hasn't been revoked in the [Settings page](https://smith.langchain.com/settings)
+  </Accordion>
+  
+  <Accordion title="No traces appearing" icon="chart-line">
+    If traces aren't showing up:
+    
+    1. Check that `LANGSMITH_TRACING=true` is set
+    2. Verify the project name: `echo $LANGSMITH_PROJECT`
+    3. Look for error messages in your application logs
+    4. Check the browser console or terminal for SDK errors
+    5. Ensure you're waiting for async operations to complete
+  </Accordion>
+  
+  <Accordion title="TypeScript type errors" icon="code">
+    If you see TypeScript errors:
+    
+    1. Ensure you're using TypeScript 5.0 or higher
+    2. Install the latest version: `npm install langsmith@latest`
+    3. Clear your node_modules and reinstall: `rm -rf node_modules package-lock.json && npm install`
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get your first trace in 5 minutes
+  </Card>
+  
+  <Card title="Tracing concepts" icon="book" href="/concepts/tracing">
+    Learn how tracing works
+  </Card>
+  
+  <Card title="OpenAI integration" icon="cube" href="/guides/openai-integration">
+    Trace OpenAI SDK calls
+  </Card>
+  
+  <Card title="LangChain integration" icon="link" href="/guides/tracing-with-langchain">
+    Use with LangChain
+  </Card>
+</CardGroup>

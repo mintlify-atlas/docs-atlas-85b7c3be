@@ -1,0 +1,475 @@
+---
+title: Evaluation
+description: Assess and improve your LLM application's quality using LangSmith's evaluation framework
+---
+
+Evaluation is essential for building reliable LLM applications. LangSmith provides a comprehensive framework for running evaluations, from simple assertions to complex LLM-as-judge patterns.
+
+## What is evaluation?
+
+Evaluation measures how well your application performs on specific tasks or datasets. In LangSmith, you:
+
+1. Define a **target function** (the system you're testing)
+2. Create or use a **dataset** (test cases with expected inputs/outputs)
+3. Write **evaluators** (functions that score outputs)
+4. Run the evaluation and analyze results
+
+## Evaluators
+
+An evaluator is a function that takes a run and optionally an example, then returns a score or feedback.
+
+### Basic evaluator structure
+
+<CodeGroup>
+```python Python
+from langsmith.schemas import Run, Example
+
+def exact_match(run: Run, example: Example) -> dict:
+    """Check if output exactly matches expected output."""
+    prediction = run.outputs.get("answer")
+    expected = example.outputs.get("answer")
+    
+    return {
+        "key": "exact_match",
+        "score": 1 if prediction == expected else 0,
+    }
+```
+
+```typescript TypeScript
+import { Run, Example, EvaluationResult } from "langsmith/evaluation";
+
+function exactMatch(run: Run, example: Example): EvaluationResult {
+  // Check if output exactly matches expected output
+  const prediction = run.outputs?.answer;
+  const expected = example.outputs?.answer;
+  
+  return {
+    key: "exact_match",
+    score: prediction === expected ? 1 : 0,
+  };
+}
+```
+</CodeGroup>
+
+### Evaluation result format
+
+Evaluators return a result with these fields:
+
+```typescript
+interface EvaluationResult {
+  // Required: unique identifier for this evaluation metric
+  key: string;
+  
+  // Optional: numeric or boolean score
+  score?: number | boolean;
+  
+  // Optional: additional value (can be any type)
+  value?: any;
+  
+  // Optional: explanation or comment
+  comment?: string;
+  
+  // Optional: suggested correction
+  correction?: Record<string, unknown>;
+  
+  // Optional: ID of the run that produced this evaluation
+  sourceRunId?: string;
+  
+  // Optional: ID of the run being evaluated (defaults to root run)
+  targetRunId?: string;
+}
+```
+
+### Multiple scores from one evaluator
+
+Return multiple metrics from a single evaluator:
+
+<CodeGroup>
+```python Python
+def comprehensive_eval(run: Run, example: Example) -> dict:
+    """Return multiple evaluation metrics."""
+    prediction = run.outputs.get("answer", "")
+    expected = example.outputs.get("answer", "")
+    
+    return {
+        "results": [
+            {
+                "key": "exact_match",
+                "score": 1 if prediction == expected else 0,
+            },
+            {
+                "key": "length_difference",
+                "score": abs(len(prediction) - len(expected)),
+            },
+            {
+                "key": "has_content",
+                "score": len(prediction.strip()) > 0,
+            },
+        ]
+    }
+```
+
+```typescript TypeScript
+function comprehensiveEval(
+  run: Run,
+  example: Example
+): { results: EvaluationResult[] } {
+  const prediction = run.outputs?.answer || "";
+  const expected = example.outputs?.answer || "";
+  
+  return {
+    results: [
+      {
+        key: "exact_match",
+        score: prediction === expected ? 1 : 0,
+      },
+      {
+        key: "length_difference",
+        score: Math.abs(prediction.length - expected.length),
+      },
+      {
+        key: "has_content",
+        score: prediction.trim().length > 0,
+      },
+    ],
+  };
+}
+```
+</CodeGroup>
+
+## Running evaluations
+
+### Using `client.evaluate()`
+
+The `evaluate()` method runs your target function on a dataset and applies evaluators:
+
+<CodeGroup>
+```python Python
+from langsmith import Client
+
+client = Client()
+
+# Define your target function
+def my_agent(inputs: dict) -> dict:
+    # Your application logic
+    question = inputs["question"]
+    answer = process_question(question)
+    return {"answer": answer}
+
+# Run evaluation
+results = client.evaluate(
+    my_agent,
+    data="my-dataset-name",  # or dataset_id
+    evaluators=[exact_match, comprehensive_eval],
+    experiment_prefix="agent-v1",
+    metadata={"version": "1.0", "model": "gpt-4"},
+)
+
+# Access results
+for result in results:
+    print(f"Example {result['example'].id}: {result['evaluation_results']}")
+```
+
+```typescript TypeScript
+import { Client } from "langsmith";
+import { evaluate } from "langsmith/evaluation";
+
+const client = new Client();
+
+// Define your target function
+function myAgent(inputs: { question: string }): { answer: string } {
+  // Your application logic
+  const answer = processQuestion(inputs.question);
+  return { answer };
+}
+
+// Run evaluation
+const results = await evaluate(myAgent, {
+  data: "my-dataset-name", // or use client.listExamples()
+  evaluators: [exactMatch, comprehensiveEval],
+  experimentPrefix: "agent-v1",
+  client,
+  metadata: { version: "1.0", model: "gpt-4" },
+});
+
+// Access results
+for await (const result of results) {
+  console.log(`Example ${result.example.id}:`, result.evaluationResults);
+}
+```
+</CodeGroup>
+
+### Evaluating existing runs
+
+Evaluate runs that have already been traced:
+
+<CodeGroup>
+```python Python
+results = client.evaluate_existing(
+    project_name="my-production-project",
+    evaluators=[quality_check, safety_check],
+    experiment_prefix="prod-eval",
+)
+```
+
+```typescript TypeScript
+const results = await evaluateExisting(
+  "my-production-project",
+  {
+    evaluators: [qualityCheck, safetyCheck],
+    experimentPrefix: "prod-eval",
+    client,
+  }
+);
+```
+</CodeGroup>
+
+## Evaluation patterns
+
+### LLM-as-judge evaluators
+
+Use an LLM to evaluate outputs:
+
+<CodeGroup>
+```python Python
+from langsmith import traceable
+import openai
+
+@traceable(run_type="llm")
+def llm_judge(run: Run, example: Example) -> dict:
+    """Use GPT-4 to evaluate response quality."""
+    prediction = run.outputs.get("answer")
+    expected = example.outputs.get("answer")
+    
+    prompt = f"""Compare the predicted answer to the expected answer.
+    
+Predicted: {prediction}
+Expected: {expected}
+
+Rate the prediction from 0-10, where 10 is perfect.
+Respond with just the number."""
+    
+    response = openai.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    
+    score = float(response.choices[0].message.content.strip())
+    
+    return {
+        "key": "llm_judge_score",
+        "score": score,
+        "comment": f"LLM rated this {score}/10",
+    }
+```
+
+```typescript TypeScript
+import { traceable } from "langsmith/traceable";
+import OpenAI from "openai";
+
+const openai = new OpenAI();
+
+const llmJudge = traceable(
+  async (run: Run, example: Example): Promise<EvaluationResult> => {
+    const prediction = run.outputs?.answer;
+    const expected = example.outputs?.answer;
+    
+    const prompt = `Compare the predicted answer to the expected answer.
+    
+Predicted: ${prediction}
+Expected: ${expected}
+
+Rate the prediction from 0-10, where 10 is perfect.
+Respond with just the number.`;
+    
+    const response = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [{ role: "user", content: prompt }],
+    });
+    
+    const score = parseFloat(response.choices[0].message.content?.trim() || "0");
+    
+    return {
+      key: "llm_judge_score",
+      score,
+      comment: `LLM rated this ${score}/10`,
+    };
+  },
+  { name: "llm_judge", run_type: "llm" }
+);
+```
+</CodeGroup>
+
+<Note>
+When using LLM-as-judge, wrap your evaluator with `@traceable` to trace the evaluation LLM calls separately.
+</Note>
+
+### Reference-free evaluators
+
+Evaluators don't always need expected outputs:
+
+<CodeGroup>
+```python Python
+def check_safety(run: Run, example: Example) -> dict:
+    """Check if response contains unsafe content."""
+    response = run.outputs.get("answer", "")
+    
+    unsafe_keywords = ["dangerous", "harmful", "illegal"]
+    is_safe = not any(keyword in response.lower() for keyword in unsafe_keywords)
+    
+    return {
+        "key": "is_safe",
+        "score": is_safe,
+        "comment": "Response is safe" if is_safe else "Response contains unsafe content",
+    }
+
+def check_latency(run: Run, example: Example) -> dict:
+    """Check if response was generated quickly enough."""
+    latency = (run.end_time - run.start_time).total_seconds()
+    
+    return {
+        "key": "latency_ok",
+        "score": latency < 5.0,  # Under 5 seconds
+        "value": latency,
+        "comment": f"Response took {latency:.2f}s",
+    }
+```
+
+```typescript TypeScript
+function checkSafety(run: Run, example: Example): EvaluationResult {
+  const response = run.outputs?.answer || "";
+  
+  const unsafeKeywords = ["dangerous", "harmful", "illegal"];
+  const isSafe = !unsafeKeywords.some(kw => 
+    response.toLowerCase().includes(kw)
+  );
+  
+  return {
+    key: "is_safe",
+    score: isSafe,
+    comment: isSafe ? "Response is safe" : "Response contains unsafe content",
+  };
+}
+
+function checkLatency(run: Run, example: Example): EvaluationResult {
+  const startTime = new Date(run.start_time).getTime();
+  const endTime = new Date(run.end_time!).getTime();
+  const latency = (endTime - startTime) / 1000; // seconds
+  
+  return {
+    key: "latency_ok",
+    score: latency < 5.0, // Under 5 seconds
+    value: latency,
+    comment: `Response took ${latency.toFixed(2)}s`,
+  };
+}
+```
+</CodeGroup>
+
+## Experiment tracking
+
+Each evaluation creates an experiment that tracks all runs and scores:
+
+```python
+# Run multiple experiments to compare approaches
+results_v1 = client.evaluate(
+    agent_v1,
+    data="my-dataset",
+    evaluators=[accuracy, latency],
+    experiment_prefix="baseline",
+)
+
+results_v2 = client.evaluate(
+    agent_v2,
+    data="my-dataset",
+    evaluators=[accuracy, latency],
+    experiment_prefix="optimized",
+)
+
+# View results in the LangSmith UI to compare
+```
+
+Experiments help you:
+- Track performance over time
+- Compare different models or prompts
+- Identify regressions
+- Make data-driven decisions
+
+## Evaluation configuration
+
+Customize evaluation behavior:
+
+<CodeGroup>
+```python Python
+results = client.evaluate(
+    my_function,
+    data="my-dataset",
+    evaluators=[evaluator1, evaluator2],
+    experiment_prefix="test-run",
+    
+    # Concurrency settings
+    max_concurrency=5,  # Run 5 examples in parallel
+    
+    # Metadata
+    metadata={
+        "version": "2.0",
+        "git_commit": "abc123",
+        "model": "gpt-4-turbo",
+    },
+    
+    # Client override
+    client=custom_client,
+)
+```
+
+```typescript TypeScript
+const results = await evaluate(myFunction, {
+  data: "my-dataset",
+  evaluators: [evaluator1, evaluator2],
+  experimentPrefix: "test-run",
+  
+  // Concurrency settings
+  maxConcurrency: 5, // Run 5 examples in parallel
+  
+  // Metadata
+  metadata: {
+    version: "2.0",
+    git_commit: "abc123",
+    model: "gpt-4-turbo",
+  },
+  
+  // Client override
+  client: customClient,
+});
+```
+</CodeGroup>
+
+## Best practices
+
+<Tip>
+**Start simple, then iterate**
+
+Begin with basic evaluators (exact match, keyword presence) before adding complex LLM-as-judge evaluators.
+</Tip>
+
+<Tip>
+**Use multiple evaluators**
+
+Evaluate different aspects: correctness, safety, latency, cost. No single metric tells the whole story.
+</Tip>
+
+<Tip>
+**Version your evaluators**
+
+As you improve evaluators, track which version was used for each experiment to ensure fair comparisons.
+</Tip>
+
+<Warning>
+LLM-as-judge evaluators can be expensive and slow. Consider using them on a sample of your dataset first.
+</Warning>
+
+## Next steps
+
+- Learn about [datasets](/concepts/datasets) for organizing test cases
+- Explore [tracing](/concepts/tracing) to understand what evaluators receive
+- Review evaluation results in the LangSmith UI

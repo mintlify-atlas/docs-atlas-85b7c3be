@@ -1,0 +1,381 @@
+---
+title: Client
+description: The main LangSmith client for managing traces, projects, datasets, and more
+---
+
+The `Client` class is the primary interface for interacting with the LangSmith API. It handles tracing, datasets, experiments, feedback, and all other LangSmith features.
+
+## Constructor
+
+```typescript
+import { Client } from "langsmith";
+
+const client = new Client({
+  apiKey: process.env.LANGSMITH_API_KEY,
+  apiUrl: "https://api.smith.langchain.com",
+});
+```
+
+<ParamField path="config" type="ClientConfig">
+  Configuration options for the client
+  
+  <Accordion title="ClientConfig properties">
+    <ParamField path="apiKey" type="string">
+      Your LangSmith API key. Defaults to `LANGSMITH_API_KEY` environment variable.
+    </ParamField>
+    
+    <ParamField path="apiUrl" type="string">
+      The LangSmith API URL. Defaults to `https://api.smith.langchain.com`.
+    </ParamField>
+    
+    <ParamField path="webUrl" type="string">
+      The LangSmith web UI URL. Auto-detected from apiUrl if not provided.
+    </ParamField>
+    
+    <ParamField path="workspaceId" type="string">
+      The workspace ID. Required for org-scoped API keys.
+    </ParamField>
+    
+    <ParamField path="timeout_ms" type="number" default="90000">
+      Request timeout in milliseconds.
+    </ParamField>
+    
+    <ParamField path="hideInputs" type="boolean | ((inputs: KVMap) => KVMap | Promise<KVMap>)">
+      Whether to hide run inputs. Can be a boolean or function to transform inputs.
+    </ParamField>
+    
+    <ParamField path="hideOutputs" type="boolean | ((outputs: KVMap) => KVMap | Promise<KVMap>)">
+      Whether to hide run outputs. Can be a boolean or function to transform outputs.
+    </ParamField>
+    
+    <ParamField path="omitTracedRuntimeInfo" type="boolean" default="false">
+      Whether to omit runtime information (SDK version, platform, etc.) from traced runs.
+    </ParamField>
+    
+    <ParamField path="autoBatchTracing" type="boolean" default="true">
+      Whether to automatically batch trace uploads.
+    </ParamField>
+    
+    <ParamField path="batchSizeBytesLimit" type="number">
+      Maximum size of a batch of runs in bytes.
+    </ParamField>
+    
+    <ParamField path="batchSizeLimit" type="number">
+      Maximum number of operations to batch in a single request.
+    </ParamField>
+    
+    <ParamField path="maxIngestMemoryBytes" type="number" default="1073741824">
+      Maximum total memory (in bytes) for both the AutoBatchQueue and batchIngestCaller queue. Defaults to 1GB.
+    </ParamField>
+    
+    <ParamField path="blockOnRootRunFinalization" type="boolean" default="false">
+      Whether to block on root run finalization. Set to true for synchronous tracing.
+    </ParamField>
+    
+    <ParamField path="traceBatchConcurrency" type="number" default="5">
+      Number of concurrent batch trace uploads.
+    </ParamField>
+    
+    <ParamField path="manualFlushMode" type="boolean" default="false">
+      Whether to require manual .flush() calls before sending traces. Useful for serverless environments.
+    </ParamField>
+    
+    <ParamField path="tracingSamplingRate" type="number">
+      Sampling rate for tracing (0.0 to 1.0). Samples at the trace level.
+    </ParamField>
+    
+    <ParamField path="debug" type="boolean" default="false">
+      Enable debug mode. If set, all sent HTTP requests will be logged.
+    </ParamField>
+    
+    <ParamField path="disablePromptCache" type="boolean" default="false">
+      Disable prompt caching for this client.
+    </ParamField>
+    
+    <ParamField path="fetchOptions" type="RequestInit">
+      Custom fetch options for HTTP requests.
+    </ParamField>
+  </Accordion>
+</ParamField>
+
+## Methods
+
+### createRun()
+
+Create a new run (trace or span).
+
+```typescript
+await client.createRun({
+  name: "my-chain",
+  run_type: "chain",
+  inputs: { query: "Hello" },
+  project_name: "my-project",
+});
+```
+
+<ParamField path="run" type="CreateRunParams" required>
+  The run parameters
+  
+  <Accordion title="CreateRunParams properties">
+    <ParamField path="name" type="string" required>
+      A human-readable name for the run.
+    </ParamField>
+    
+    <ParamField path="inputs" type="KVMap" required>
+      The inputs that were used to initiate the run.
+    </ParamField>
+    
+    <ParamField path="run_type" type="string" required>
+      The type of run (e.g., "llm", "chain", "tool", "retriever").
+    </ParamField>
+    
+    <ParamField path="id" type="string">
+      Unique identifier for the run. Auto-generated if not provided.
+    </ParamField>
+    
+    <ParamField path="start_time" type="number | string">
+      The epoch time at which the run started.
+    </ParamField>
+    
+    <ParamField path="end_time" type="number | string">
+      The epoch time at which the run ended.
+    </ParamField>
+    
+    <ParamField path="outputs" type="KVMap">
+      Outputs produced by the run.
+    </ParamField>
+    
+    <ParamField path="error" type="string">
+      Error message if the run failed.
+    </ParamField>
+    
+    <ParamField path="project_name" type="string">
+      The name of the project/session.
+    </ParamField>
+    
+    <ParamField path="parent_run_id" type="string">
+      ID of the parent run if this is a child run.
+    </ParamField>
+    
+    <ParamField path="trace_id" type="string">
+      Unique ID assigned to every run within this nested trace.
+    </ParamField>
+    
+    <ParamField path="reference_example_id" type="string">
+      ID of an example that might be related to this run.
+    </ParamField>
+    
+    <ParamField path="tags" type="string[]">
+      Tags for categorizing the run.
+    </ParamField>
+    
+    <ParamField path="extra" type="KVMap">
+      Additional metadata or settings for the run.
+    </ParamField>
+  </Accordion>
+</ParamField>
+
+### updateRun()
+
+Update an existing run.
+
+```typescript
+await client.updateRun(runId, {
+  outputs: { response: "Hello!" },
+  end_time: Date.now(),
+});
+```
+
+### flush()
+
+Flush current queued traces immediately.
+
+```typescript
+await client.flush();
+```
+
+### createProject()
+
+Create a new project.
+
+```typescript
+const project = await client.createProject({
+  projectName: "my-project",
+  description: "My LangSmith project",
+});
+```
+
+<ParamField path="params" type="CreateProjectParams" required>
+  <Accordion title="CreateProjectParams properties">
+    <ParamField path="projectName" type="string" required>
+      The name of the project.
+    </ParamField>
+    
+    <ParamField path="description" type="string | null">
+      A description of the project.
+    </ParamField>
+    
+    <ParamField path="metadata" type="Record<string, any> | null">
+      Extra metadata for the project.
+    </ParamField>
+    
+    <ParamField path="upsert" type="boolean">
+      If true, update the project if it already exists.
+    </ParamField>
+    
+    <ParamField path="referenceDatasetId" type="string | null">
+      The reference dataset ID this project's runs were generated on.
+    </ParamField>
+  </Accordion>
+</ParamField>
+
+### createDataset()
+
+Create a new dataset.
+
+```typescript
+const dataset = await client.createDataset("my-dataset", {
+  description: "My evaluation dataset",
+  dataType: "kv",
+});
+```
+
+### createExample()
+
+Create an example in a dataset.
+
+```typescript
+await client.createExample(
+  { query: "What is LangSmith?" },
+  { answer: "LangSmith is an observability platform" },
+  {
+    datasetName: "my-dataset",
+    metadata: { source: "docs" },
+  }
+);
+```
+
+### listRuns()
+
+List runs from a project with filtering.
+
+```typescript
+const runs = await client.listRuns({
+  projectName: "my-project",
+  limit: 10,
+  filter: 'eq(run_type, "llm")',
+});
+```
+
+<ParamField path="params" type="ListRunsParams">
+  <Accordion title="ListRunsParams properties">
+    <ParamField path="projectId" type="string | string[]">
+      The ID or IDs of the project(s) to filter by.
+    </ParamField>
+    
+    <ParamField path="projectName" type="string | string[]">
+      The name or names of the project(s) to filter by.
+    </ParamField>
+    
+    <ParamField path="traceId" type="string">
+      The ID of the trace to filter by.
+    </ParamField>
+    
+    <ParamField path="isRoot" type="boolean">
+      Whether to only include root runs.
+    </ParamField>
+    
+    <ParamField path="runType" type="string">
+      The run type to filter by (e.g., "llm", "chain").
+    </ParamField>
+    
+    <ParamField path="error" type="boolean">
+      Filter by error runs.
+    </ParamField>
+    
+    <ParamField path="limit" type="number">
+      The maximum number of runs to retrieve.
+    </ParamField>
+    
+    <ParamField path="filter" type="string">
+      Filter query string using LangSmith's filter language. Supports comparators like eq, neq, gt, gte, lt, lte, has, and search.
+    </ParamField>
+    
+    <ParamField path="startTime" type="Date">
+      The start time to filter by.
+    </ParamField>
+  </Accordion>
+</ParamField>
+
+### createFeedback()
+
+Create feedback for a run.
+
+```typescript
+await client.createFeedback(runId, "quality", {
+  score: 0.8,
+  comment: "Good response",
+});
+```
+
+### getPrompt()
+
+Retrieve a prompt from the LangSmith Hub.
+
+```typescript
+const prompt = await client.getPrompt("my-prompt");
+const promptAtCommit = await client.getPrompt("my-prompt:abc123");
+```
+
+## Static methods
+
+### getDefaultClientConfig()
+
+Get the default client configuration from environment variables.
+
+```typescript
+const config = Client.getDefaultClientConfig();
+```
+
+<ResponseField name="apiUrl" type="string">
+  API URL from `LANGSMITH_ENDPOINT` or default.
+</ResponseField>
+
+<ResponseField name="apiKey" type="string">
+  API key from `LANGSMITH_API_KEY`.
+</ResponseField>
+
+<ResponseField name="hideInputs" type="boolean">
+  Whether to hide inputs from `LANGSMITH_HIDE_INPUTS`.
+</ResponseField>
+
+<ResponseField name="hideOutputs" type="boolean">
+  Whether to hide outputs from `LANGSMITH_HIDE_OUTPUTS`.
+</ResponseField>
+
+## Example usage
+
+```typescript
+import { Client } from "langsmith";
+
+const client = new Client();
+
+// Create a run
+const runId = "550e8400-e29b-41d4-a716-446655440000";
+await client.createRun({
+  id: runId,
+  name: "my-llm-call",
+  run_type: "llm",
+  inputs: { prompt: "Hello" },
+  project_name: "my-project",
+});
+
+// Update the run with outputs
+await client.updateRun(runId, {
+  outputs: { response: "Hi there!" },
+  end_time: Date.now(),
+});
+
+// Flush traces
+await client.flush();
+```

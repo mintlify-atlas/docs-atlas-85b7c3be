@@ -1,0 +1,334 @@
+---
+title: Client
+description: Synchronous client for interacting with the LangSmith API
+---
+
+The `Client` class is the primary interface for interacting with the LangSmith API. Use it to customize API keys, workspace connections, SSL certificates, and manage LangSmith resources like runs, datasets, examples, and feedback.
+
+## Constructor
+
+```python
+from langsmith import Client
+
+client = Client(
+    api_url="https://api.smith.langchain.com",
+    api_key="your-api-key"
+)
+```
+
+<ParamField path="api_url" type="str | None">
+  URL for the LangSmith API. Defaults to the `LANGCHAIN_ENDPOINT` or `LANGSMITH_ENDPOINT` environment variable, or `https://api.smith.langchain.com` if not set.
+</ParamField>
+
+<ParamField path="api_key" type="str | None">
+  API key for authentication. Defaults to the `LANGCHAIN_API_KEY` or `LANGSMITH_API_KEY` environment variable.
+</ParamField>
+
+<ParamField path="timeout_ms" type="int | tuple[int, int, int, int] | None">
+  Timeout for requests in milliseconds. Can be a single value or a tuple of (connect, read, write, pool) timeouts.
+</ParamField>
+
+<ParamField path="web_url" type="str | None">
+  URL for the LangSmith web application. Used for generating links to traces and datasets.
+</ParamField>
+
+<ParamField path="session" type="requests.Session | None">
+  Custom requests session to use for HTTP calls.
+</ParamField>
+
+<ParamField path="auto_batch_tracing" type="bool">
+  Whether to automatically batch tracing data. Default is `True`.
+</ParamField>
+
+<ParamField path="hide_inputs" type="Callable[[dict], dict] | None">
+  Function to hide or redact sensitive input data before sending to LangSmith.
+</ParamField>
+
+<ParamField path="hide_outputs" type="Callable[[dict], dict] | None">
+  Function to hide or redact sensitive output data before sending to LangSmith.
+</ParamField>
+
+<ParamField path="info" type="ls_schemas.LangSmithInfo | None">
+  Additional information about the LangSmith instance.
+</ParamField>
+
+## Core methods
+
+### create_run
+
+Create a new run (trace span) in LangSmith.
+
+```python
+client.create_run(
+    name="my-chain",
+    inputs={"query": "What is LangSmith?"},
+    run_type="chain",
+    project_name="my-project"
+)
+```
+
+<ParamField path="name" type="str" required>
+  Name of the run.
+</ParamField>
+
+<ParamField path="inputs" type="dict[str, Any]" required>
+  Input data for the run.
+</ParamField>
+
+<ParamField path="run_type" type="str" required>
+  Type of run: `"llm"`, `"chain"`, `"tool"`, `"retriever"`, or `"prompt"`.
+</ParamField>
+
+<ParamField path="project_name" type="str | None">
+  Project to log the run to. Defaults to the `LANGCHAIN_PROJECT` environment variable.
+</ParamField>
+
+<ParamField path="run_id" type="UUID | str | None">
+  Unique identifier for the run. Auto-generated if not provided.
+</ParamField>
+
+<ParamField path="parent_run_id" type="UUID | str | None">
+  ID of the parent run for nested traces.
+</ParamField>
+
+<ParamField path="start_time" type="datetime | None">
+  Start time of the run. Defaults to current time.
+</ParamField>
+
+<ParamField path="tags" type="list[str] | None">
+  Tags to attach to the run for filtering and organization.
+</ParamField>
+
+<ParamField path="metadata" type="dict[str, Any] | None">
+  Additional metadata to attach to the run.
+</ParamField>
+
+<ResponseField name="return" type="None">
+  This method queues the run for background upload and returns immediately.
+</ResponseField>
+
+### update_run
+
+Update an existing run with outputs and end time.
+
+```python
+client.update_run(
+    run_id=run_id,
+    outputs={"answer": "LangSmith is a platform for..."},
+    end_time=datetime.now()
+)
+```
+
+<ParamField path="run_id" type="UUID | str" required>
+  ID of the run to update.
+</ParamField>
+
+<ParamField path="outputs" type="dict[str, Any] | None">
+  Output data from the run.
+</ParamField>
+
+<ParamField path="error" type="str | None">
+  Error message if the run failed.
+</ParamField>
+
+<ParamField path="end_time" type="datetime | None">
+  End time of the run.
+</ParamField>
+
+### create_feedback
+
+Create feedback (metric/score) for a run.
+
+```python
+client.create_feedback(
+    run_id=run_id,
+    key="accuracy",
+    score=0.95,
+    comment="Excellent response"
+)
+```
+
+<ParamField path="run_id" type="UUID | str" required>
+  ID of the run to attach feedback to.
+</ParamField>
+
+<ParamField path="key" type="str" required>
+  Name of the metric or feedback type.
+</ParamField>
+
+<ParamField path="score" type="float | int | bool | None">
+  Numeric score for the feedback.
+</ParamField>
+
+<ParamField path="value" type="str | dict | None">
+  Non-numeric value for the feedback.
+</ParamField>
+
+<ParamField path="comment" type="str | None">
+  Explanation or context for the feedback.
+</ParamField>
+
+<ParamField path="correction" type="dict | None">
+  Suggested correction if the output was incorrect.
+</ParamField>
+
+## Dataset methods
+
+### create_dataset
+
+Create a new dataset for evaluation.
+
+```python
+dataset = client.create_dataset(
+    dataset_name="my-dataset",
+    description="QA pairs for evaluation"
+)
+```
+
+<ParamField path="dataset_name" type="str" required>
+  Name of the dataset.
+</ParamField>
+
+<ParamField path="description" type="str | None">
+  Description of the dataset's purpose.
+</ParamField>
+
+<ParamField path="data_type" type="DataType | None">
+  Type of data: `"kv"`, `"llm"`, or `"chat"`.
+</ParamField>
+
+<ResponseField name="return" type="Dataset">
+  The created dataset object.
+</ResponseField>
+
+### create_example
+
+Add an example (record) to a dataset.
+
+```python
+example = client.create_example(
+    inputs={"question": "What is LangSmith?"},
+    outputs={"answer": "A platform for LLM development"},
+    dataset_id=dataset.id
+)
+```
+
+<ParamField path="inputs" type="dict[str, Any]" required>
+  Input data for the example.
+</ParamField>
+
+<ParamField path="outputs" type="dict[str, Any] | None">
+  Expected output data (ground truth).
+</ParamField>
+
+<ParamField path="dataset_id" type="UUID | str" required>
+  ID of the dataset to add the example to.
+</ParamField>
+
+<ParamField path="metadata" type="dict[str, Any] | None">
+  Additional metadata for the example.
+</ParamField>
+
+<ResponseField name="return" type="Example">
+  The created example object.
+</ResponseField>
+
+### list_datasets
+
+List all datasets in your workspace.
+
+```python
+for dataset in client.list_datasets():
+    print(dataset.name, dataset.example_count)
+```
+
+<ResponseField name="return" type="Iterator[Dataset]">
+  Iterator of dataset objects.
+</ResponseField>
+
+## Prompt methods
+
+### pull_prompt
+
+Pull a prompt from the LangSmith prompt hub.
+
+```python
+prompt = client.pull_prompt("my-prompt")
+# or with version
+prompt = client.pull_prompt("username/my-prompt:abc123")
+```
+
+<ParamField path="prompt_identifier" type="str" required>
+  Prompt identifier in format `"name"`, `"owner/name"`, `"name:hash"`, or `"owner/name:hash"`.
+</ParamField>
+
+<ParamField path="include_model" type="bool | None">
+  Whether to include model configuration in the prompt.
+</ParamField>
+
+<ResponseField name="return" type="Any">
+  The prompt object (typically a LangChain prompt template).
+</ResponseField>
+
+### push_prompt
+
+Push a prompt to the LangSmith prompt hub.
+
+```python
+from langchain_core.prompts import ChatPromptTemplate
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful assistant."),
+    ("user", "{question}")
+])
+
+client.push_prompt("my-prompt", object=prompt)
+```
+
+<ParamField path="prompt_identifier" type="str" required>
+  Name or identifier for the prompt.
+</ParamField>
+
+<ParamField path="object" type="Any" required>
+  The prompt object to push (typically a LangChain prompt).
+</ParamField>
+
+<ParamField path="is_public" type="bool">
+  Whether to make the prompt publicly accessible. Default is `False`.
+</ParamField>
+
+<ResponseField name="return" type="str">
+  URL of the pushed prompt.
+</ResponseField>
+
+## Evaluation methods
+
+### evaluate
+
+Evaluate a target system on a dataset.
+
+```python
+from langsmith import evaluate
+
+def my_function(inputs):
+    return {"output": process(inputs["input"])}
+
+results = client.evaluate(
+    my_function,
+    data="my-dataset",
+    evaluators=[accuracy_evaluator],
+    experiment_prefix="my-experiment"
+)
+```
+
+See the [evaluate()](/python/evaluate) documentation for full details.
+
+## Context manager
+
+The client can be used as a context manager to ensure proper cleanup:
+
+```python
+with Client() as client:
+    client.create_run(...)
+# Background threads are stopped and pending runs are flushed
+```

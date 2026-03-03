@@ -1,0 +1,569 @@
+---
+title: Run trees
+description: Understand the hierarchical structure that organizes traces in LangSmith
+---
+
+RunTree is the core data structure that represents traces in LangSmith. It organizes runs into a hierarchical tree that mirrors your application's execution flow.
+
+## What is a RunTree?
+
+A RunTree is a tree structure where:
+
+- Each **node** is a run representing a single operation
+- The **root** is the top-level operation (e.g., the entire agent execution)
+- **Children** are nested operations (e.g., LLM calls, tool invocations)
+- **Edges** represent parent-child relationships
+
+```
+Agent Execution (root)
+├── Format Prompt (child)
+├── LLM Call (child)
+│   └── Token Usage Calculation (grandchild)
+└── Parse Output (child)
+    └── Validation (grandchild)
+```
+
+## Creating RunTrees
+
+### Basic creation
+
+<CodeGroup>
+```python Python
+from langsmith.run_trees import RunTree
+from datetime import datetime, timezone
+
+# Create a root run
+root = RunTree(
+    name="my_application",
+    run_type="chain",
+    inputs={"query": "What is LangSmith?"},
+    start_time=datetime.now(timezone.utc),
+)
+
+print(f"Run ID: {root.id}")
+print(f"Trace ID: {root.trace_id}")  # Same as root.id for root runs
+print(f"Dotted Order: {root.dotted_order}")
+```
+
+```typescript TypeScript
+import { RunTree } from "langsmith";
+
+// Create a root run
+const root = new RunTree({
+  name: "my_application",
+  run_type: "chain",
+  inputs: { query: "What is LangSmith?" },
+  start_time: Date.now(),
+});
+
+console.log(`Run ID: ${root.id}`);
+console.log(`Trace ID: ${root.trace_id}`); // Same as root.id for root runs
+console.log(`Dotted Order: ${root.dotted_order}`);
+```
+</CodeGroup>
+
+### Creating child runs
+
+<CodeGroup>
+```python Python
+# Create a child run
+child = root.create_child(
+    name="llm_call",
+    run_type="llm",
+    inputs={"prompt": "What is LangSmith?"},
+)
+
+print(f"Child ID: {child.id}")
+print(f"Parent ID: {child.parent_run_id}")  # Points to root.id
+print(f"Trace ID: {child.trace_id}")  # Same as root.trace_id
+print(f"Dotted Order: {child.dotted_order}")  # Includes parent's dotted order
+
+# Create a grandchild
+grandchild = child.create_child(
+    name="tokenizer",
+    run_type="tool",
+    inputs={"text": "What is LangSmith?"},
+)
+```
+
+```typescript TypeScript
+// Create a child run
+const child = root.createChild({
+  name: "llm_call",
+  run_type: "llm",
+  inputs: { prompt: "What is LangSmith?" },
+});
+
+console.log(`Child ID: ${child.id}`);
+console.log(`Parent ID: ${child.parent_run_id}`); // Points to root.id
+console.log(`Trace ID: ${child.trace_id}`); // Same as root.trace_id
+console.log(`Dotted Order: ${child.dotted_order}`); // Includes parent's dotted order
+
+// Create a grandchild
+const grandchild = child.createChild({
+  name: "tokenizer",
+  run_type: "tool",
+  inputs: { text: "What is LangSmith?" },
+});
+```
+</CodeGroup>
+
+## RunTree properties
+
+Each RunTree node contains:
+
+### Core identifiers
+
+- **`id`** - Unique UUID v7 for this run (time-ordered)
+- **`trace_id`** - UUID of the root run (same for all runs in a trace)
+- **`parent_run_id`** - UUID of the parent run (None for root)
+- **`dotted_order`** - Hierarchical position string
+
+### Run metadata
+
+- **`name`** - Human-readable name
+- **`run_type`** - Category (llm, chain, tool, etc.)
+- **`start_time`** / **`end_time`** - Execution timestamps
+- **`inputs`** / **`outputs`** - Data passed in and out
+- **`error`** - Error message if the run failed
+
+### Organization
+
+- **`tags`** - List of labels for filtering
+- **`extra.metadata`** - Dictionary of additional context
+- **`project_name`** - LangSmith project name
+- **`session_id`** - Project UUID
+
+### Relationships
+
+- **`parent_run`** - Reference to parent RunTree (excluded from serialization)
+- **`child_runs`** - List of child RunTrees (excluded from serialization)
+
+## Understanding dotted order
+
+The dotted order is a critical feature that maintains the execution sequence of runs.
+
+### Format
+
+A dotted order segment combines a timestamp and UUID:
+
+```
+{timestamp}{uuid}
+20230914T223155647000Z1b64098b-4ab7-43f6-afee-992304f198d8
+```
+
+For nested runs, segments are joined with dots:
+
+```python
+# Root run
+root.dotted_order = "20230914T223155647000Z1b64098b-4ab7-43f6-afee-992304f198d8"
+
+# Child run includes parent's dotted order
+child.dotted_order = "20230914T223155647000Z1b64098b-4ab7-43f6-afee-992304f198d8.20230914T223155649000Z809ed3a2-0172-4f4d-8a02-a64e9b7a0f8a"
+
+# Grandchild includes both
+grandchild.dotted_order = "20230914T223155647000Z1b64098b-4ab7-43f6-afee-992304f198d8.20230914T223155649000Z809ed3a2-0172-4f4d-8a02-a64e9b7a0f8a.20230914T223155651000Zc8d9f4c5-6c5a-4b2d-9b1c-3d9d7a7c5c7c"
+```
+
+### Why dotted order matters
+
+Dotted order enables:
+
+1. **Chronological sorting** - Traces display in execution order
+2. **Parallel run handling** - Correctly orders runs that arrive out-of-sequence
+3. **Hierarchical relationships** - Preserves parent-child structure
+4. **Distributed tracing** - Maintains order across services
+
+<Info>
+Runs can be submitted to LangSmith in any order. The dotted order ensures they're displayed correctly regardless of arrival time.
+</Info>
+
+## Managing run lifecycle
+
+### Ending runs
+
+<CodeGroup>
+```python Python
+# End a run with outputs
+child.end(
+    outputs={"response": "LangSmith is a platform for LLM observability"},
+    end_time=datetime.now(timezone.utc),
+)
+
+# End a run with an error
+try:
+    result = risky_operation()
+    child.end(outputs={"result": result})
+except Exception as e:
+    child.end(error=str(e))
+
+# Add metadata when ending
+child.end(
+    outputs={"response": "..."},
+    metadata={"model": "gpt-4", "tokens": 150},
+)
+```
+
+```typescript TypeScript
+// End a run with outputs
+await child.end(
+  { response: "LangSmith is a platform for LLM observability" },
+  undefined,
+  Date.now()
+);
+
+// End a run with an error
+try {
+  const result = riskyOperation();
+  await child.end({ result });
+} catch (error) {
+  await child.end(undefined, String(error));
+}
+
+// Add metadata when ending
+await child.end(
+  { response: "..." },
+  undefined,
+  Date.now(),
+  { model: "gpt-4", tokens: 150 }
+);
+```
+</CodeGroup>
+
+### Posting to LangSmith
+
+<CodeGroup>
+```python Python
+# Post the entire tree (root and all children)
+root.post()
+
+# Post just this run (excludes children)
+root.post(exclude_child_runs=True)
+
+# Patch/update an existing run
+child.patch()
+```
+
+```typescript TypeScript
+// Post the entire tree (root and all children)
+await root.postRun(false);
+
+// Post just this run (excludes children)
+await root.postRun(true);
+
+// Patch/update an existing run
+await child.patchRun();
+```
+</CodeGroup>
+
+## Working with metadata
+
+<CodeGroup>
+```python Python
+# Add metadata
+root.add_metadata({
+    "user_id": "123",
+    "session_id": "abc",
+    "environment": "production",
+})
+
+# Add tags
+root.add_tags(["important", "customer-facing"])
+
+# Add more tags
+root.add_tags("experiment-v2")
+
+# Update inputs/outputs
+root.add_inputs({"additional_context": "some data"})
+root.add_outputs({"metadata": {"confidence": 0.95}})
+
+# Use the set method to override default behavior
+root.set(
+    inputs={"new_input": "value"},
+    outputs={"new_output": "value"},
+    tags=["tag1", "tag2"],
+    metadata={"key": "value"},
+)
+```
+
+```typescript TypeScript
+// Set metadata via the metadata property
+root.metadata = {
+  user_id: "123",
+  session_id: "abc",
+  environment: "production",
+};
+
+// Add tags
+root.tags = [...(root.tags || []), "important", "customer-facing"];
+
+// Add more tags
+root.tags = [...(root.tags || []), "experiment-v2"];
+
+// Update inputs (create new object to trigger update)
+root.inputs = { ...root.inputs, additional_context: "some data" };
+
+// Update outputs
+root.outputs = {
+  ...root.outputs,
+  metadata: { confidence: 0.95 },
+};
+```
+</CodeGroup>
+
+## Advanced patterns
+
+### Creating from headers (distributed tracing)
+
+<CodeGroup>
+```python Python
+from langsmith.run_trees import RunTree
+
+# In Service A: create headers to pass to Service B
+run_a = RunTree(name="service_a", run_type="chain", inputs={"data": "value"})
+headers = run_a.to_headers()
+# headers = {"langsmith-trace": "...", "baggage": "..."}
+
+# In Service B: continue the trace
+parent = RunTree.from_headers(headers)
+run_b = parent.create_child(
+    name="service_b",
+    run_type="tool",
+    inputs={"received": "data"},
+)
+```
+
+```typescript TypeScript
+import { RunTree } from "langsmith";
+
+// In Service A: create headers to pass to Service B
+const runA = new RunTree({
+  name: "service_a",
+  run_type: "chain",
+  inputs: { data: "value" },
+});
+const headers = runA.toHeaders();
+// headers = { "langsmith-trace": "...", "baggage": "..." }
+
+// In Service B: continue the trace
+const parent = RunTree.fromHeaders(headers);
+const runB = parent.createChild({
+  name: "service_b",
+  run_type: "tool",
+  inputs: { received: "data" },
+});
+```
+</CodeGroup>
+
+### Creating from dotted order
+
+<CodeGroup>
+```python Python
+# Create a RunTree from a dotted order string
+dotted_order = "20230914T223155647000Z1b64098b-4ab7-43f6-afee-992304f198d8"
+run = RunTree.from_dotted_order(
+    dotted_order,
+    name="continued_run",
+    run_type="chain",
+)
+```
+
+```typescript TypeScript
+// Create a RunTree from a dotted order string
+const dottedOrder = "20230914T223155647000Z1b64098b-4ab7-43f6-afee-992304f198d8";
+const run = RunTree.fromDottedOrder(dottedOrder);
+```
+</CodeGroup>
+
+### Run tree with custom client
+
+<CodeGroup>
+```python Python
+from langsmith import Client
+
+# Create a custom client
+custom_client = Client(
+    api_key="your-api-key",
+    api_url="https://custom.langsmith.com",
+)
+
+# Use it with RunTree
+run = RunTree(
+    name="custom_run",
+    run_type="chain",
+    inputs={},
+    client=custom_client,
+)
+```
+
+```typescript TypeScript
+import { Client, RunTree } from "langsmith";
+
+// Create a custom client
+const customClient = new Client({
+  apiKey: "your-api-key",
+  apiUrl: "https://custom.langsmith.com",
+});
+
+// Use it with RunTree
+const run = new RunTree({
+  name: "custom_run",
+  run_type: "chain",
+  inputs: {},
+  client: customClient,
+});
+```
+</CodeGroup>
+
+## RunTree vs @traceable
+
+When should you use each?
+
+### Use `@traceable` when:
+
+- You want automatic tracing with minimal code
+- Your application follows a function call pattern
+- You're integrating with LangChain or similar frameworks
+
+### Use `RunTree` directly when:
+
+- You need fine-grained control over run lifecycle
+- You're building custom integrations
+- You need to manually manage parent-child relationships
+- You're implementing distributed tracing
+
+<CodeGroup>
+```python Python
+# @traceable - Simple and automatic
+@traceable(run_type="chain")
+def my_function(input: str):
+    result = process(input)
+    return result
+
+# RunTree - Full control
+def my_function_manual(input: str):
+    run = RunTree(
+        name="my_function",
+        run_type="chain",
+        inputs={"input": input},
+    )
+    try:
+        result = process(input)
+        run.end(outputs={"result": result})
+        return result
+    except Exception as e:
+        run.end(error=str(e))
+        raise
+    finally:
+        run.post()
+```
+
+```typescript TypeScript
+// traceable - Simple and automatic
+const myFunction = traceable(
+  (input: string) => {
+    const result = process(input);
+    return result;
+  },
+  { name: "my_function", run_type: "chain" }
+);
+
+// RunTree - Full control
+async function myFunctionManual(input: string) {
+  const run = new RunTree({
+    name: "my_function",
+    run_type: "chain",
+    inputs: { input },
+  });
+  try {
+    const result = process(input);
+    await run.end({ result });
+    return result;
+  } catch (error) {
+    await run.end(undefined, String(error));
+    throw error;
+  } finally {
+    await run.postRun();
+  }
+}
+```
+</CodeGroup>
+
+## Common patterns
+
+### Conditional tracing
+
+<CodeGroup>
+```python Python
+from langsmith import get_current_run_tree
+
+def my_function(input: str, trace: bool = True):
+    if trace:
+        run = RunTree(name="my_function", run_type="chain", inputs={"input": input})
+    
+    try:
+        result = process(input)
+        if trace:
+            run.end(outputs={"result": result})
+        return result
+    finally:
+        if trace:
+            run.post()
+```
+
+```typescript TypeScript
+function myFunction(input: string, trace = true) {
+  let run: RunTree | undefined;
+  
+  if (trace) {
+    run = new RunTree({
+      name: "my_function",
+      run_type: "chain",
+      inputs: { input },
+    });
+  }
+  
+  try {
+    const result = process(input);
+    if (run) {
+      run.end({ result });
+    }
+    return result;
+  } finally {
+    if (run) {
+      run.postRun();
+    }
+  }
+}
+```
+</CodeGroup>
+
+## Best practices
+
+<Tip>
+**Always end your runs**
+
+Even if an error occurs, call `end()` to capture the error and timing information.
+</Tip>
+
+<Tip>
+**Use meaningful names**
+
+Run names appear in the UI. Use descriptive names that explain what the operation does.
+</Tip>
+
+<Tip>
+**Leverage dotted order**
+
+The dotted order handles ordering automatically. Don't try to manage timestamps manually.
+</Tip>
+
+<Warning>
+Don't modify `dotted_order` or `trace_id` manually. These are managed automatically by the RunTree.
+</Warning>
+
+## Next steps
+
+- Learn about [tracing](/concepts/tracing) patterns and best practices
+- Explore [evaluation](/concepts/evaluation) using run trees
+- Understand [datasets](/concepts/datasets) for testing with run trees

@@ -1,0 +1,389 @@
+---
+title: Evaluators
+description: Classes and utilities for creating custom evaluators
+---
+
+Evaluators are functions or classes that score and assess runs during evaluation experiments. LangSmith provides base classes and utilities for creating custom evaluators.
+
+## RunEvaluator
+
+Base class for creating reusable evaluators.
+
+```python
+from langsmith.evaluation import RunEvaluator, EvaluationResult
+from langsmith.schemas import Run, Example
+
+class MyEvaluator(RunEvaluator):
+    def evaluate_run(self, run: Run, example: Example | None = None) -> EvaluationResult:
+        prediction = run.outputs.get("answer", "")
+        reference = example.outputs.get("answer", "") if example else ""
+        
+        return EvaluationResult(
+            key="accuracy",
+            score=1.0 if prediction == reference else 0.0,
+            comment=f"Prediction: {prediction}, Reference: {reference}"
+        )
+```
+
+### Methods
+
+<ParamField path="evaluate_run" type="(Run, Example | None) -> EvaluationResult | EvaluationResults" required>
+  Synchronous evaluation method. Must be implemented.
+  
+  - `run`: The run (trace) to evaluate
+  - `example`: The dataset example (with ground truth), if available
+  
+  Returns `EvaluationResult` or `EvaluationResults`.
+</ParamField>
+
+<ParamField path="aevaluate_run" type="async (Run, Example | None) -> EvaluationResult | EvaluationResults">
+  Async evaluation method. Optional. If not implemented, falls back to running `evaluate_run` in a thread pool.
+</ParamField>
+
+## EvaluationResult
+
+Represents the result of evaluating a single run.
+
+```python
+from langsmith.evaluation import EvaluationResult
+
+result = EvaluationResult(
+    key="accuracy",
+    score=0.95,
+    comment="Nearly perfect match",
+    metadata={"model": "gpt-4"}
+)
+```
+
+### Fields
+
+<ParamField path="key" type="str" required>
+  Name of the metric or evaluation aspect (e.g., `"accuracy"`, `"relevance"`).
+</ParamField>
+
+<ParamField path="score" type="float | int | bool | None">
+  Numeric score for the evaluation. Use this for quantitative metrics.
+  
+  ```python
+  EvaluationResult(key="accuracy", score=0.85)
+  ```
+</ParamField>
+
+<ParamField path="value" type="str | dict | None">
+  Non-numeric value for qualitative assessments.
+  
+  ```python
+  EvaluationResult(key="category", value="good")
+  ```
+</ParamField>
+
+<ParamField path="comment" type="str | None">
+  Explanation or reasoning for the evaluation.
+  
+  ```python
+  EvaluationResult(
+      key="relevance",
+      score=0.9,
+      comment="Highly relevant, minor detail missing"
+  )
+  ```
+</ParamField>
+
+<ParamField path="metadata" type="dict | None">
+  Additional metadata about the evaluation.
+  
+  ```python
+  EvaluationResult(
+      key="accuracy",
+      score=0.95,
+      metadata={"evaluator_version": "2.0", "confidence": 0.99}
+  )
+  ```
+</ParamField>
+
+<ParamField path="correction" type="dict | None">
+  Suggested correction if the output was incorrect.
+  
+  ```python
+  EvaluationResult(
+      key="accuracy",
+      score=0.0,
+      correction={"correct_answer": "42"}
+  )
+  ```
+</ParamField>
+
+<ParamField path="evaluator_info" type="dict">
+  Information about the evaluator itself.
+  
+  ```python
+  EvaluationResult(
+      key="accuracy",
+      score=0.95,
+      evaluator_info={"name": "ExactMatchEvaluator", "version": "1.0"}
+  )
+  ```
+</ParamField>
+
+<ParamField path="feedback_config" type="FeedbackConfig | dict | None">
+  Configuration for how to display this feedback in the UI.
+  
+  ```python
+  EvaluationResult(
+      key="rating",
+      score=4,
+      feedback_config={
+          "type": "categorical",
+          "categories": [
+              {"value": 1, "label": "Poor"},
+              {"value": 5, "label": "Excellent"}
+          ]
+      }
+  )
+  ```
+</ParamField>
+
+<ParamField path="source_run_id" type="UUID | str | None">
+  ID of the evaluator's own trace (if the evaluator was traced).
+</ParamField>
+
+<ParamField path="target_run_id" type="UUID | str | None">
+  ID of a specific run to attach feedback to. If not provided, attaches to the root run.
+</ParamField>
+
+## EvaluationResults
+
+Container for multiple evaluation results from a single evaluator.
+
+```python
+from langsmith.evaluation import EvaluationResults, EvaluationResult
+
+def multi_metric_evaluator(run, example):
+    return EvaluationResults(
+        results=[
+            EvaluationResult(key="accuracy", score=0.9),
+            EvaluationResult(key="latency", score=1.2),
+            EvaluationResult(key="cost", score=0.001)
+        ]
+    )
+```
+
+<ParamField path="results" type="list[EvaluationResult]" required>
+  List of evaluation results.
+</ParamField>
+
+## run_evaluator decorator
+
+Convert a function into a `RunEvaluator`.
+
+```python
+from langsmith.evaluation import run_evaluator, EvaluationResult
+
+@run_evaluator
+def accuracy_evaluator(run, example):
+    prediction = run.outputs.get("answer")
+    reference = example.outputs.get("answer") if example else None
+    
+    return EvaluationResult(
+        key="accuracy",
+        score=1.0 if prediction == reference else 0.0
+    )
+
+# Use in evaluate()
+from langsmith import evaluate
+
+evaluate(
+    my_function,
+    data="dataset",
+    evaluators=[accuracy_evaluator]
+)
+```
+
+The decorated function can return:
+- `EvaluationResult`
+- `EvaluationResults`
+- `dict` (converted to `EvaluationResult`)
+
+### Function signature options
+
+The evaluator function can have various signatures:
+
+```python
+# Basic: run only
+@run_evaluator
+def eval_run(run):
+    return {"key": "score", "score": 1.0}
+
+# With example
+@run_evaluator
+def eval_with_example(run, example):
+    return EvaluationResult(key="accuracy", score=0.9)
+
+# With explicit inputs/outputs
+@run_evaluator
+def eval_detailed(inputs, outputs, reference_outputs):
+    # inputs: dict from run.inputs
+    # outputs: dict from run.outputs
+    # reference_outputs: dict from example.outputs
+    return EvaluationResult(key="match", score=1.0)
+```
+
+## ComparisonEvaluationResult
+
+For comparative evaluations between multiple runs.
+
+```python
+from langsmith.evaluation import ComparisonEvaluationResult
+
+def preference_evaluator(runs, example):
+    run_a, run_b = runs
+    
+    # Compare and score
+    return ComparisonEvaluationResult(
+        key="preference",
+        scores={
+            run_a.id: 1.0,  # Preferred
+            run_b.id: 0.0
+        },
+        comment="Run A is more concise"
+    )
+```
+
+<ParamField path="key" type="str" required>
+  Name of the comparison metric.
+</ParamField>
+
+<ParamField path="scores" type="dict[UUID | str, float | int | bool | None]" required>
+  Scores for each run being compared, keyed by run ID.
+</ParamField>
+
+<ParamField path="comment" type="str | dict[UUID | str, str] | None">
+  Comments about the comparison. Can be a single string or per-run comments.
+  
+  ```python
+  ComparisonEvaluationResult(
+      key="preference",
+      scores={run_a.id: 1.0, run_b.id: 0.0},
+      comment={
+          run_a.id: "Better formatting",
+          run_b.id: "Too verbose"
+      }
+  )
+  ```
+</ParamField>
+
+<ParamField path="source_run_id" type="UUID | str | None">
+  ID of the evaluator's trace.
+</ParamField>
+
+## Examples
+
+### LLM-as-judge evaluator
+
+```python
+from langsmith.evaluation import run_evaluator, EvaluationResult
+from langchain_openai import ChatOpenAI
+
+@run_evaluator
+def llm_judge(run, example):
+    llm = ChatOpenAI(model="gpt-4")
+    
+    prompt = f"""
+    Question: {example.inputs['question']}
+    Expected Answer: {example.outputs['answer']}
+    Actual Answer: {run.outputs['answer']}
+    
+    Is the actual answer correct? Respond with only 'yes' or 'no'.
+    """
+    
+    response = llm.invoke(prompt)
+    is_correct = response.content.strip().lower() == "yes"
+    
+    return EvaluationResult(
+        key="llm_correctness",
+        score=1.0 if is_correct else 0.0,
+        comment=f"LLM judge: {response.content}"
+    )
+```
+
+### Multi-metric evaluator
+
+```python
+from langsmith.evaluation import run_evaluator, EvaluationResults, EvaluationResult
+
+@run_evaluator
+def comprehensive_evaluator(run, example):
+    prediction = run.outputs.get("answer", "")
+    reference = example.outputs.get("answer", "")
+    
+    # Calculate multiple metrics
+    exact_match = prediction == reference
+    length_diff = abs(len(prediction) - len(reference))
+    latency = (run.end_time - run.start_time).total_seconds()
+    
+    return EvaluationResults(
+        results=[
+            EvaluationResult(key="exact_match", score=1.0 if exact_match else 0.0),
+            EvaluationResult(key="length_diff", score=length_diff),
+            EvaluationResult(key="latency_seconds", score=latency),
+        ]
+    )
+```
+
+### Embedding similarity evaluator
+
+```python
+from langsmith.evaluation import run_evaluator, EvaluationResult
+from langchain_openai import OpenAIEmbeddings
+import numpy as np
+
+@run_evaluator
+def embedding_similarity(run, example):
+    embeddings = OpenAIEmbeddings()
+    
+    prediction = run.outputs.get("answer", "")
+    reference = example.outputs.get("answer", "")
+    
+    pred_emb = embeddings.embed_query(prediction)
+    ref_emb = embeddings.embed_query(reference)
+    
+    # Cosine similarity
+    similarity = np.dot(pred_emb, ref_emb) / (
+        np.linalg.norm(pred_emb) * np.linalg.norm(ref_emb)
+    )
+    
+    return EvaluationResult(
+        key="embedding_similarity",
+        score=float(similarity),
+        metadata={"model": "text-embedding-3-small"}
+    )
+```
+
+### Summary evaluator
+
+Summary evaluators run after all examples are processed:
+
+```python
+from langsmith.evaluation import EvaluationResult
+
+def summary_stats(runs, examples):
+    """Compute aggregate statistics."""
+    total_runs = len(runs)
+    successful_runs = sum(1 for r in runs if not r.error)
+    avg_latency = sum(
+        (r.end_time - r.start_time).total_seconds() 
+        for r in runs if r.end_time
+    ) / total_runs
+    
+    return [
+        EvaluationResult(key="success_rate", score=successful_runs / total_runs),
+        EvaluationResult(key="avg_latency", score=avg_latency),
+    ]
+
+# Use with evaluate
+evaluate(
+    target,
+    data="dataset",
+    summary_evaluators=[summary_stats]
+)
+```

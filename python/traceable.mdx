@@ -1,0 +1,302 @@
+---
+title: "@traceable"
+description: Decorator for automatically tracing function calls to LangSmith
+---
+
+The `@traceable` decorator automatically creates traces for function calls, capturing inputs, outputs, errors, and timing information. It works with both sync and async functions.
+
+## Basic usage
+
+```python
+from langsmith import traceable
+
+@traceable
+def my_function(input_text: str) -> str:
+    # Your logic here
+    return f"Processed: {input_text}"
+
+result = my_function("hello")
+# Automatically traced to LangSmith
+```
+
+## Parameters
+
+<ParamField path="name" type="str | None">
+  Custom name for the traced operation. Defaults to the function name.
+  
+  ```python
+  @traceable(name="custom-operation")
+  def my_function():
+      pass
+  ```
+</ParamField>
+
+<ParamField path="run_type" type="str">
+  Type of run to create. Options: `"llm"`, `"chain"`, `"tool"`, `"retriever"`, `"prompt"`. Default is `"chain"`.
+  
+  ```python
+  @traceable(run_type="tool")
+  def search_database(query: str):
+      return results
+  ```
+</ParamField>
+
+<ParamField path="project_name" type="str | None">
+  LangSmith project to log traces to. Overrides the default project.
+  
+  ```python
+  @traceable(project_name="my-project")
+  def my_function():
+      pass
+  ```
+</ParamField>
+
+<ParamField path="tags" type="list[str] | None">
+  Tags to attach to the trace for filtering and organization.
+  
+  ```python
+  @traceable(tags=["production", "v2"])
+  def my_function():
+      pass
+  ```
+</ParamField>
+
+<ParamField path="metadata" type="dict[str, Any] | None">
+  Additional metadata to attach to the trace.
+  
+  ```python
+  @traceable(metadata={"version": "1.0", "team": "ml"})
+  def my_function():
+      pass
+  ```
+</ParamField>
+
+<ParamField path="client" type="Client | None">
+  Custom LangSmith client to use for tracing.
+  
+  ```python
+  from langsmith import Client, traceable
+  
+  custom_client = Client(api_key="...")
+  
+  @traceable(client=custom_client)
+  def my_function():
+      pass
+  ```
+</ParamField>
+
+<ParamField path="reduce_fn" type="Callable[[Sequence], dict | str] | None">
+  Function to reduce/aggregate outputs from generators or iterators.
+  
+  ```python
+  @traceable(reduce_fn=lambda outputs: {"combined": "".join(outputs)})
+  def generate_text():
+      for chunk in chunks:
+          yield chunk
+  ```
+</ParamField>
+
+<ParamField path="process_inputs" type="Callable[[dict], dict] | None">
+  Function to process/filter inputs before tracing. Useful for hiding sensitive data.
+  
+  ```python
+  def hide_sensitive(inputs):
+      return {k: v for k, v in inputs.items() if k != "api_key"}
+  
+  @traceable(process_inputs=hide_sensitive)
+  def my_function(data: str, api_key: str):
+      pass
+  ```
+</ParamField>
+
+<ParamField path="process_outputs" type="Callable[..., dict] | None">
+  Function to process/filter outputs before tracing.
+  
+  ```python
+  @traceable(process_outputs=lambda x: {"result": x[:100]})
+  def my_function():
+      return "very long output..."
+  ```
+</ParamField>
+
+<ParamField path="process_chunk" type="Callable | None">
+  Function to process individual chunks from streaming responses.
+</ParamField>
+
+## Async functions
+
+The decorator works seamlessly with async functions:
+
+```python
+@traceable
+async def async_function(input_text: str) -> str:
+    await asyncio.sleep(1)
+    return f"Processed: {input_text}"
+
+result = await async_function("hello")
+```
+
+## Nested tracing
+
+Traces are automatically nested when calling traced functions from other traced functions:
+
+```python
+@traceable(name="helper")
+def helper_function(x: int) -> int:
+    return x * 2
+
+@traceable(name="main")
+def main_function(x: int) -> int:
+    # This creates a nested trace under main_function
+    result = helper_function(x)
+    return result + 1
+
+main_function(5)  # Creates a parent trace with a child trace
+```
+
+## Generators and streaming
+
+The decorator supports generator functions for streaming scenarios:
+
+```python
+@traceable
+def generate_tokens(text: str):
+    for token in text.split():
+        yield token
+
+# All yielded values are collected and traced
+for token in generate_tokens("hello world"):
+    print(token)
+```
+
+Use `reduce_fn` to aggregate streaming outputs:
+
+```python
+@traceable(reduce_fn=lambda chunks: {"full_text": "".join(chunks)})
+def stream_response():
+    for chunk in ["Hello", " ", "world"]:
+        yield chunk
+```
+
+## Runtime configuration with langsmith_extra
+
+Override tracing parameters at runtime using the `langsmith_extra` parameter:
+
+```python
+@traceable
+def my_function(input_text: str, langsmith_extra: dict | None = None) -> str:
+    return f"Processed: {input_text}"
+
+# Override name and tags at runtime
+my_function(
+    "hello",
+    langsmith_extra={
+        "name": "custom-name",
+        "tags": ["special"],
+        "metadata": {"user_id": "123"}
+    }
+)
+```
+
+Available fields in `langsmith_extra`:
+
+<ResponseField name="name" type="str">
+  Override the run name.
+</ResponseField>
+
+<ResponseField name="run_id" type="UUID | str">
+  Specify a custom run ID.
+</ResponseField>
+
+<ResponseField name="parent" type="RunTree | str | Mapping">
+  Override the parent run.
+</ResponseField>
+
+<ResponseField name="project_name" type="str">
+  Override the project name.
+</ResponseField>
+
+<ResponseField name="tags" type="list[str]">
+  Override or add tags.
+</ResponseField>
+
+<ResponseField name="metadata" type="dict[str, Any]">
+  Override or add metadata.
+</ResponseField>
+
+<ResponseField name="client" type="Client">
+  Use a different client.
+</ResponseField>
+
+## Conditional tracing
+
+Control whether tracing is enabled using environment variables or the `tracing_context` manager:
+
+```python
+import os
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
+
+@traceable
+def my_function():
+    pass
+
+my_function()  # Not traced
+```
+
+Or use `tracing_context`:
+
+```python
+from langsmith import traceable, tracing_context
+
+@traceable
+def my_function():
+    pass
+
+with tracing_context(enabled=False):
+    my_function()  # Not traced
+```
+
+## Error handling
+
+Errors are automatically captured and included in the trace:
+
+```python
+@traceable
+def failing_function():
+    raise ValueError("Something went wrong")
+
+try:
+    failing_function()
+except ValueError:
+    pass  # Error is logged in the trace
+```
+
+## Best practices
+
+1. **Use descriptive names**: Help identify operations in the UI
+   ```python
+   @traceable(name="fetch-user-data")
+   def get_user(user_id: str):
+       pass
+   ```
+
+2. **Set appropriate run types**: Makes filtering easier
+   ```python
+   @traceable(run_type="retriever")
+   def search_docs(query: str):
+       pass
+   ```
+
+3. **Redact sensitive data**: Use `process_inputs` and `process_outputs`
+   ```python
+   @traceable(process_inputs=lambda x: {"query": x.get("query")})
+   def query_with_key(query: str, api_key: str):
+       pass
+   ```
+
+4. **Add context with metadata**: Include version, environment info
+   ```python
+   @traceable(metadata={"version": "2.0", "env": "prod"})
+   def my_function():
+       pass
+   ```

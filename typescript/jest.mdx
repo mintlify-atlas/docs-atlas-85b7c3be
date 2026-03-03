@@ -1,0 +1,355 @@
+---
+title: Jest integration
+description: LangSmith integration for Jest testing framework
+---
+
+The LangSmith Jest integration allows you to run LLM evaluations as part of your Jest test suite, automatically creating datasets and experiments in LangSmith.
+
+## Installation
+
+```bash
+npm install --save-dev langsmith
+```
+
+## Setup
+
+Import the LangSmith Jest wrapper in your test files:
+
+```typescript
+import * as ls from "langsmith/jest";
+```
+
+## Basic usage
+
+```typescript
+import * as ls from "langsmith/jest";
+
+ls.describe("My LLM application", () => {
+  ls.test(
+    "Should respond correctly",
+    {
+      inputs: { query: "What is LangSmith?" },
+      referenceOutputs: { answer: "LangSmith is an observability platform" },
+    },
+    async ({ inputs, referenceOutputs }) => {
+      const response = await myApp(inputs.query);
+      
+      ls.expect(response.answer).toContain("observability");
+      
+      return { answer: response.answer };
+    }
+  );
+});
+```
+
+## API
+
+### ls.describe()
+
+Defines a LangSmith test suite. Creates a dataset in LangSmith.
+
+```typescript
+ls.describe(name: string, fn: () => void, config?: Partial<RunTreeConfig>)
+```
+
+<ParamField path="name" type="string" required>
+  The name or description of the test suite. This becomes the dataset name in LangSmith.
+</ParamField>
+
+<ParamField path="fn" type="() => void" required>
+  The function containing test cases.
+</ParamField>
+
+<ParamField path="config" type="Partial<RunTreeConfig>">
+  Optional configuration for tracing/sending results.
+</ParamField>
+
+### ls.test()
+
+Defines a LangSmith test case. Creates an example in the dataset and runs it as an experiment.
+
+```typescript
+ls.test(
+  name: string,
+  lsParams: LangSmithJestlikeWrapperParams<I, O>,
+  fn: ({ inputs, referenceOutputs }) => any,
+  timeout?: number
+)
+```
+
+<ParamField path="name" type="string" required>
+  The name or description of the test case.
+</ParamField>
+
+<ParamField path="lsParams" type="LangSmithJestlikeWrapperParams<I, O>" required>
+  Input and output for the evaluation
+  
+  <Accordion title="LangSmithJestlikeWrapperParams properties">
+    <ParamField path="inputs" type="I" required>
+      The inputs for this example.
+    </ParamField>
+    
+    <ParamField path="referenceOutputs" type="O">
+      The expected/reference outputs for this example.
+    </ParamField>
+    
+    <ParamField path="metadata" type="Record<string, any>">
+      Additional metadata for the example.
+    </ParamField>
+    
+    <ParamField path="attachments" type="Attachments">
+      Attachments for the example.
+    </ParamField>
+  </Accordion>
+</ParamField>
+
+<ParamField path="fn" type="({ inputs, referenceOutputs }) => any" required>
+  The function containing the test implementation. Receives inputs and referenceOutputs from parameters. Returning a value populates experiment output in LangSmith.
+</ParamField>
+
+<ParamField path="timeout" type="number">
+  Optional timeout in milliseconds for the test.
+</ParamField>
+
+### ls.test.each()
+
+Iterate over multiple examples:
+
+```typescript
+ls.test.each([
+  {
+    inputs: { query: "Question 1" },
+    referenceOutputs: { answer: "Answer 1" },
+  },
+  {
+    inputs: { query: "Question 2" },
+    referenceOutputs: { answer: "Answer 2" },
+  },
+])(
+  "Should handle various inputs",
+  async ({ inputs, referenceOutputs }) => {
+    const response = await myApp(inputs.query);
+    ls.expect(response).toBeDefined();
+    return response;
+  }
+);
+```
+
+### ls.expect()
+
+Wrapped `expect` with additional matchers for LangSmith.
+
+```typescript
+ls.expect(actual).evaluatedBy(evaluator).toBeGreaterThan(0.5);
+```
+
+#### Custom matchers
+
+**evaluatedBy()**
+
+Runs an evaluator and asserts on the score:
+
+```typescript
+const myEvaluator = async ({ inputs, outputs, referenceOutputs }) => {
+  return {
+    key: "quality",
+    score: 0.7,
+  };
+};
+
+await ls.expect(response).evaluatedBy(myEvaluator).toBeGreaterThan(0.5);
+```
+
+**toBeRelativeCloseTo()**
+
+Assert that strings are similar using relative distance:
+
+```typescript
+await ls.expect("hello world").toBeRelativeCloseTo("hello world!", {
+  threshold: 0.9,
+});
+```
+
+**toBeAbsoluteCloseTo()**
+
+Assert that strings are similar using absolute distance:
+
+```typescript
+await ls.expect("hello").toBeAbsoluteCloseTo("hallo", {
+  maxDistance: 1,
+});
+```
+
+**toBeSemanticCloseTo()**
+
+Assert that strings are semantically similar using embeddings:
+
+```typescript
+await ls.expect("The cat sat on the mat")
+  .toBeSemanticCloseTo("A feline rested on the rug", {
+    threshold: 0.8,
+  });
+```
+
+### ls.logFeedback()
+
+Log feedback associated with the current test.
+
+```typescript
+ls.logFeedback({
+  key: "quality",
+  score: 0.8,
+  comment: "Good response",
+});
+```
+
+<ParamField path="feedback" type="EvaluationResult" required>
+  <Accordion title="EvaluationResult properties">
+    <ParamField path="key" type="string" required>
+      The name of the feedback metric.
+    </ParamField>
+    
+    <ParamField path="score" type="number | boolean">
+      The value of the feedback.
+    </ParamField>
+    
+    <ParamField path="comment" type="string">
+      A comment about the feedback.
+    </ParamField>
+  </Accordion>
+</ParamField>
+
+### ls.logOutputs()
+
+Log output associated with the current test.
+
+```typescript
+ls.logOutputs({ answer: "42" });
+```
+
+<Note>
+If a value is returned from your test case, it will override manually logged output.
+</Note>
+
+### ls.wrapEvaluator()
+
+Wraps an evaluator function, adding tracing and logging.
+
+```typescript
+const myEvaluator = async ({ inputs, actual, referenceOutputs }) => {
+  return {
+    key: "quality",
+    score: 0.7,
+  };
+};
+
+const wrappedEvaluator = ls.wrapEvaluator(myEvaluator);
+
+await wrappedEvaluator({ inputs, referenceOutputs, actual: response });
+```
+
+## Complete example
+
+```typescript
+import * as ls from "langsmith/jest";
+import { myLLMApp } from "./app";
+
+ls.describe("LLM Application Tests", () => {
+  ls.test(
+    "Should answer general knowledge questions",
+    {
+      inputs: { query: "What is the capital of France?" },
+      referenceOutputs: { answer: "Paris" },
+    },
+    async ({ inputs, referenceOutputs }) => {
+      const response = await myLLMApp(inputs.query);
+      
+      // Regular Jest assertion
+      ls.expect(response.answer).toBeDefined();
+      
+      // Log custom feedback
+      ls.logFeedback({
+        key: "answer_length",
+        score: response.answer.length,
+      });
+      
+      // Return outputs for LangSmith
+      return { answer: response.answer };
+    }
+  );
+  
+  ls.test(
+    "Should handle toxic queries appropriately",
+    {
+      inputs: { query: "How do I do something harmful?" },
+      referenceOutputs: { answer: "I cannot help with that" },
+    },
+    async ({ inputs, referenceOutputs }) => {
+      const response = await myLLMApp(inputs.query);
+      
+      // Use evaluator matcher
+      const toxicityEvaluator = async ({ outputs }) => {
+        // Your toxicity detection logic
+        return {
+          key: "toxicity",
+          score: detectToxicity(outputs.answer),
+        };
+      };
+      
+      await ls.expect(response)
+        .evaluatedBy(toxicityEvaluator)
+        .toBeLessThan(0.1);
+      
+      return response;
+    }
+  );
+  
+  ls.test.each([
+    {
+      inputs: { query: "What is 2+2?" },
+      referenceOutputs: { answer: "4" },
+    },
+    {
+      inputs: { query: "What is 3+3?" },
+      referenceOutputs: { answer: "6" },
+    },
+  ])(
+    "Should handle math questions",
+    async ({ inputs, referenceOutputs }) => {
+      const response = await myLLMApp(inputs.query);
+      
+      await ls.expect(response.answer)
+        .toBeRelativeCloseTo(referenceOutputs.answer, { threshold: 0.9 });
+      
+      return response;
+    }
+  );
+});
+```
+
+## Configuration
+
+### Disable LangSmith tracking
+
+For purely local testing without creating experiments:
+
+```bash
+LANGSMITH_TEST_TRACKING=false npm test
+```
+
+### Custom Jest configuration
+
+If using multiple Jest versions in a monorepo:
+
+```typescript
+import { wrapJest } from "langsmith/jest";
+import * as jest from "@jest/globals";
+
+const ls = wrapJest(jest);
+
+ls.describe("My tests", () => {
+  ls.test("test case", { inputs: {}, referenceOutputs: {} }, async () => {
+    // ...
+  });
+});
+```

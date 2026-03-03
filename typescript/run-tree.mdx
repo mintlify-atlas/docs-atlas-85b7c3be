@@ -1,0 +1,280 @@
+---
+title: RunTree
+description: Low-level API for creating and managing trace trees
+---
+
+The `RunTree` class provides a low-level API for creating and managing trace trees. While `traceable()` is recommended for most use cases, `RunTree` gives you fine-grained control over trace creation.
+
+## Constructor
+
+```typescript
+import { RunTree } from "langsmith";
+
+const run = new RunTree({
+  name: "my-chain",
+  run_type: "chain",
+  inputs: { query: "Hello" },
+  project_name: "my-project",
+});
+```
+
+<ParamField path="config" type="RunTreeConfig" required>
+  Configuration for the run tree
+  
+  <Accordion title="RunTreeConfig properties">
+    <ParamField path="name" type="string" required>
+      A human-readable name for the run.
+    </ParamField>
+    
+    <ParamField path="run_type" type="string" required>
+      The type of run (e.g., "llm", "chain", "tool", "retriever").
+    </ParamField>
+    
+    <ParamField path="inputs" type="KVMap">
+      The inputs that were used to initiate the run.
+    </ParamField>
+    
+    <ParamField path="id" type="string">
+      Unique identifier for the run. Auto-generated if not provided.
+    </ParamField>
+    
+    <ParamField path="project_name" type="string">
+      The name of the project/session.
+    </ParamField>
+    
+    <ParamField path="parent_run" type="RunTree">
+      Parent run tree if this is a child run.
+    </ParamField>
+    
+    <ParamField path="client" type="Client">
+      Custom LangSmith client instance.
+    </ParamField>
+    
+    <ParamField path="tracingEnabled" type="boolean">
+      Whether tracing is enabled.
+    </ParamField>
+    
+    <ParamField path="tags" type="string[]">
+      Tags for categorizing the run.
+    </ParamField>
+    
+    <ParamField path="metadata" type="Record<string, any>">
+      Metadata to attach to the run.
+    </ParamField>
+    
+    <ParamField path="reference_example_id" type="string">
+      ID of an example that might be related to this run.
+    </ParamField>
+  </Accordion>
+</ParamField>
+
+## Properties
+
+<ResponseField name="id" type="string">
+  Unique identifier for the run.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The name of the run.
+</ResponseField>
+
+<ResponseField name="run_type" type="string">
+  The type of run.
+</ResponseField>
+
+<ResponseField name="inputs" type="KVMap">
+  The run's inputs.
+</ResponseField>
+
+<ResponseField name="outputs" type="KVMap">
+  The run's outputs.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message if the run failed.
+</ResponseField>
+
+<ResponseField name="trace_id" type="string">
+  The ID of the root trace.
+</ResponseField>
+
+<ResponseField name="dotted_order" type="string">
+  The dotted order for the run (used for sorting).
+</ResponseField>
+
+## Methods
+
+### postRun()
+
+Post the run to LangSmith (send the initial run creation).
+
+```typescript
+await run.postRun();
+```
+
+### end()
+
+End the run and send the final update to LangSmith.
+
+```typescript
+await run.end({ response: "Hello!" });
+```
+
+<ParamField path="outputs" type="KVMap">
+  The outputs to attach to the run.
+</ParamField>
+
+<ParamField path="error" type="string">
+  Error message if the run failed.
+</ParamField>
+
+### patchRun()
+
+Update the run in LangSmith.
+
+```typescript
+await run.patchRun();
+```
+
+### createChild()
+
+Create a child run.
+
+```typescript
+const childRun = run.createChild({
+  name: "child-run",
+  run_type: "llm",
+  inputs: { prompt: "Hello" },
+});
+```
+
+<ParamField path="config" type="RunTreeConfig" required>
+  Configuration for the child run.
+</ParamField>
+
+<ResponseField name="RunTree" type="RunTree">
+  The child run tree.
+</ResponseField>
+
+### addEvent()
+
+Add an event to the run (e.g., for streaming tokens).
+
+```typescript
+run.addEvent({
+  name: "new_token",
+  kwargs: { token: "Hello" },
+});
+```
+
+### addMetadata()
+
+Add metadata to the run.
+
+```typescript
+run.addMetadata({ key: "value" });
+```
+
+### addTags()
+
+Add tags to the run.
+
+```typescript
+run.addTags(["tag1", "tag2"]);
+```
+
+## Example usage
+
+### Basic usage
+
+```typescript
+import { RunTree } from "langsmith";
+
+const run = new RunTree({
+  name: "my-chain",
+  run_type: "chain",
+  inputs: { query: "What is LangSmith?" },
+  project_name: "my-project",
+});
+
+await run.postRun();
+
+try {
+  // Do work
+  const result = "LangSmith is an observability platform";
+  
+  await run.end({ response: result });
+} catch (error) {
+  await run.end(undefined, String(error));
+}
+```
+
+### Nested runs
+
+```typescript
+const parentRun = new RunTree({
+  name: "parent-chain",
+  run_type: "chain",
+  inputs: { query: "Hello" },
+});
+
+await parentRun.postRun();
+
+const childRun = parentRun.createChild({
+  name: "llm-call",
+  run_type: "llm",
+  inputs: { prompt: "Hello" },
+});
+
+await childRun.postRun();
+await childRun.end({ response: "Hi!" });
+
+await parentRun.end({ response: "Hi!" });
+```
+
+### With streaming
+
+```typescript
+const run = new RunTree({
+  name: "streaming-llm",
+  run_type: "llm",
+  inputs: { prompt: "Tell me a story" },
+});
+
+await run.postRun();
+
+const chunks: string[] = [];
+for await (const chunk of streamingResponse) {
+  chunks.push(chunk);
+  run.addEvent({
+    name: "new_token",
+    kwargs: { token: chunk },
+  });
+}
+
+await run.end({ response: chunks.join("") });
+```
+
+## Static methods
+
+### fromRunnableConfig()
+
+Create a RunTree from a LangChain RunnableConfig.
+
+```typescript
+const run = RunTree.fromRunnableConfig(runnableConfig, extraConfig);
+```
+
+## When to use RunTree vs traceable()
+
+Use `RunTree` when you need:
+- Fine-grained control over when runs are posted/updated
+- To manually manage the trace tree structure
+- To integrate with non-async code
+- To add events during streaming
+
+Use `traceable()` when:
+- You want automatic trace management
+- You're wrapping functions
+- You want cleaner code with decorators
+- AsyncLocalStorage works in your environment

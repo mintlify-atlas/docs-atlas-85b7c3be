@@ -1,0 +1,372 @@
+---
+title: Tracing context
+description: Context managers and functions for controlling tracing behavior
+---
+
+LangSmith provides several utilities for managing tracing context, including enabling/disabling tracing, setting projects, and managing trace metadata.
+
+## tracing_context
+
+Context manager for temporarily modifying tracing configuration.
+
+```python
+from langsmith import traceable, tracing_context
+
+@traceable
+def my_function():
+    return "result"
+
+with tracing_context(
+    project_name="my-project",
+    tags=["production"],
+    metadata={"user_id": "123"},
+    enabled=True
+):
+    my_function()  # Traced with specified context
+```
+
+### Parameters
+
+<ParamField path="project_name" type="str | None">
+  Override the project name for traces within this context.
+  
+  ```python
+  with tracing_context(project_name="experiments"):
+      my_function()  # Logged to "experiments" project
+  ```
+</ParamField>
+
+<ParamField path="tags" type="list[str] | None">
+  Add tags to all traces within this context.
+  
+  ```python
+  with tracing_context(tags=["experiment-1", "beta"]):
+      my_function()  # Tagged accordingly
+  ```
+</ParamField>
+
+<ParamField path="metadata" type="dict[str, Any] | None">
+  Add metadata to all traces within this context.
+  
+  ```python
+  with tracing_context(metadata={"version": "2.0", "env": "staging"}):
+      my_function()
+  ```
+</ParamField>
+
+<ParamField path="parent" type="RunTree | Mapping | str | False | None">
+  Set a parent run for all traces in this context.
+  
+  - `RunTree`: Use a specific RunTree as parent
+  - `Mapping`: Request headers for distributed tracing
+  - `str`: Dotted order string
+  - `False`: Explicitly disable parent (start new trace)
+  
+  ```python
+  # Distributed tracing from request headers
+  with tracing_context(parent=request.headers):
+      my_function()
+  ```
+</ParamField>
+
+<ParamField path="enabled" type="bool | Literal['local'] | None">
+  Control whether tracing is enabled.
+  
+  - `True`: Enable tracing and send to LangSmith
+  - `False`: Disable tracing completely
+  - `"local"`: Enable tracing but only store locally (no upload)
+  - `None`: Use current context value
+  
+  ```python
+  with tracing_context(enabled=False):
+      my_function()  # Not traced
+  ```
+</ParamField>
+
+<ParamField path="client" type="Client | None">
+  Use a specific LangSmith client for traces in this context.
+  
+  ```python
+  from langsmith import Client, tracing_context
+  
+  custom_client = Client(api_key="...")
+  
+  with tracing_context(client=custom_client):
+      my_function()
+  ```
+</ParamField>
+
+<ParamField path="replicas" type="Sequence[WriteReplica] | None">
+  Send traces to multiple destinations.
+  
+  ```python
+  with tracing_context(replicas=[
+      {"project_name": "backup-project"},
+      {"api_url": "https://other-instance.com", "api_key": "..."}
+  ]):
+      my_function()  # Sent to multiple projects/instances
+  ```
+</ParamField>
+
+### Nested contexts
+
+Contexts can be nested, with inner contexts overriding outer ones:
+
+```python
+with tracing_context(project_name="outer", tags=["outer-tag"]):
+    my_function()  # project="outer", tags=["outer-tag"]
+    
+    with tracing_context(project_name="inner", tags=["inner-tag"]):
+        my_function()  # project="inner", tags=["inner-tag"]
+    
+    my_function()  # Back to project="outer", tags=["outer-tag"]
+```
+
+## get_tracing_context
+
+Get the current tracing context values.
+
+```python
+from langsmith import get_tracing_context
+
+context = get_tracing_context()
+print(context["project_name"])  # Current project
+print(context["enabled"])       # Whether tracing is enabled
+print(context["tags"])          # Current tags
+print(context["metadata"])      # Current metadata
+```
+
+<ResponseField name="return" type="dict[str, Any]">
+  Dictionary with keys: `parent`, `project_name`, `tags`, `metadata`, `enabled`, `client`, `replicas`, `distributed_parent_id`.
+</ResponseField>
+
+## get_current_run_tree
+
+Get the currently active RunTree (if any).
+
+```python
+from langsmith import traceable, get_current_run_tree
+
+@traceable
+def my_function():
+    run = get_current_run_tree()
+    if run:
+        print(f"Current run ID: {run.id}")
+        print(f"Trace ID: {run.trace_id}")
+        # Access run properties
+        print(run.metadata)
+        print(run.tags)
+```
+
+<ResponseField name="return" type="RunTree | None">
+  The current RunTree if inside a traced function, otherwise `None`.
+</ResponseField>
+
+## set_run_metadata
+
+Update metadata on the current run.
+
+```python
+from langsmith import traceable, set_run_metadata
+
+@traceable
+def my_function(user_id: str):
+    # Add metadata dynamically during execution
+    set_run_metadata(
+        user_id=user_id,
+        execution_time=1.23,
+        model_version="v2"
+    )
+    return "result"
+
+my_function("user-123")
+# Metadata is attached to the trace
+```
+
+<ParamField path="**metadata" type="Any">
+  Key-value pairs to add to the current run's metadata.
+</ParamField>
+
+## configure
+
+Configure global LangSmith tracing settings that persist across your application.
+
+```python
+from langsmith import configure, Client
+
+# Set global configuration once at startup
+configure(
+    client=Client(api_key="your-key"),
+    enabled=True,
+    project_name="my-default-project",
+    tags=["production", "v2"],
+    metadata={"environment": "prod", "version": "2.0.0"}
+)
+
+# All subsequent traces use these settings
+@traceable
+def my_function():
+    pass
+
+my_function()  # Uses global configuration
+```
+
+### Parameters
+
+<ParamField path="client" type="Client | None">
+  Set the global LangSmith client. Pass `None` to clear.
+  
+  ```python
+  from langsmith import configure, Client
+  
+  # Configure global client with custom settings
+  configure(client=Client(
+      api_key="...",
+      hide_inputs=lambda x: {k: "***" for k in x},
+      hide_outputs=lambda x: {k: "***" for k in x}
+  ))
+  ```
+</ParamField>
+
+<ParamField path="enabled" type="bool | Literal['local'] | None">
+  Set global tracing state.
+  
+  - `True`: Enable tracing
+  - `False`: Disable tracing
+  - `"local"`: Enable local-only tracing
+  - `None`: Clear the setting (use environment variables)
+  
+  ```python
+  # Disable all tracing globally
+  configure(enabled=False)
+  ```
+</ParamField>
+
+<ParamField path="project_name" type="str | None">
+  Set the default project name for all traces. Pass `None` to clear.
+  
+  ```python
+  configure(project_name="my-project")
+  ```
+</ParamField>
+
+<ParamField path="tags" type="list[str] | None">
+  Set global tags applied to all traces. Pass `None` to clear.
+  
+  ```python
+  configure(tags=["production", "us-east-1"])
+  ```
+</ParamField>
+
+<ParamField path="metadata" type="dict[str, Any] | None">
+  Set global metadata applied to all traces. Pass `None` to clear.
+  
+  ```python
+  configure(metadata={
+      "environment": "production",
+      "version": "1.0.0",
+      "team": "ml-platform"
+  })
+  ```
+</ParamField>
+
+### Example: Global data masking
+
+```python
+from langsmith import configure, Client
+
+def mask_sensitive_data(data: dict) -> dict:
+    """Remove sensitive fields from trace data."""
+    masked = data.copy()
+    sensitive_keys = ["api_key", "password", "token"]
+    for key in sensitive_keys:
+        if key in masked:
+            masked[key] = "***REDACTED***"
+    return masked
+
+# Apply masking globally
+configure(client=Client(
+    hide_inputs=mask_sensitive_data,
+    hide_outputs=mask_sensitive_data
+))
+
+# All traces now have masked data
+@traceable
+def my_function(api_key: str, data: str):
+    return {"result": data, "token": "secret"}
+```
+
+## set_tracing_parent
+
+Set a specific RunTree as the active parent within a context block.
+
+```python
+from langsmith import RunTree, set_tracing_parent, traceable
+
+parent = RunTree(
+    name="parent",
+    run_type="chain",
+    inputs={}
+)
+parent.post()
+
+with set_tracing_parent(parent):
+    # This function becomes a child of parent
+    @traceable
+    def child_function():
+        pass
+    
+    child_function()
+```
+
+Unlike `tracing_context`, this only sets the parent run and doesn't modify other context variables.
+
+## Environment variables
+
+Tracing behavior can be controlled via environment variables:
+
+```bash
+# Enable/disable tracing
+export LANGCHAIN_TRACING_V2=true
+
+# Set default project
+export LANGCHAIN_PROJECT=my-project
+
+# Set API key
+export LANGSMITH_API_KEY=your-key
+
+# Set API endpoint (for self-hosted)
+export LANGSMITH_ENDPOINT=https://your-instance.com
+```
+
+The `configure()` function and `tracing_context()` manager override these environment variables.
+
+## Best practices
+
+1. **Use `configure()` at startup**: Set global defaults once
+   ```python
+   # In your main.py or app startup
+   configure(
+       project_name="my-app",
+       tags=["production"]
+   )
+   ```
+
+2. **Use `tracing_context()` for overrides**: Temporarily change settings
+   ```python
+   with tracing_context(project_name="experiment-1"):
+       run_experiment()
+   ```
+
+3. **Add runtime metadata**: Use `set_run_metadata()` for dynamic info
+   ```python
+   @traceable
+   def process(user_id: str):
+       set_run_metadata(user_id=user_id)
+   ```
+
+4. **Disable in tests**: Use environment variables or `configure()`
+   ```python
+   # In conftest.py
+   configure(enabled=False)
+   ```

@@ -1,0 +1,377 @@
+---
+title: wrap_anthropic
+description: Automatic tracing for Anthropic API calls
+---
+
+The `wrap_anthropic()` function wraps an Anthropic client to automatically trace all API calls to LangSmith.
+
+## Basic usage
+
+```python
+from langsmith import wrappers
+import anthropic
+
+# Wrap the Anthropic client
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+# All API calls are now automatically traced
+response = client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+## Function signature
+
+```python
+def wrap_anthropic(
+    client: Anthropic | AsyncAnthropic,
+    *,
+    project_name: str | None = None,
+    tags: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+    client_: Client | None = None
+) -> Anthropic | AsyncAnthropic:
+    ...
+```
+
+### Parameters
+
+<ParamField path="client" type="Anthropic | AsyncAnthropic" required>
+  The Anthropic client instance to wrap. Can be sync or async.
+  
+  ```python
+  import anthropic
+  
+  # Sync client
+  client = wrappers.wrap_anthropic(anthropic.Anthropic())
+  
+  # Async client
+  async_client = wrappers.wrap_anthropic(anthropic.AsyncAnthropic())
+  ```
+</ParamField>
+
+<ParamField path="project_name" type="str | None">
+  LangSmith project to log traces to.
+  
+  ```python
+  client = wrappers.wrap_anthropic(
+      anthropic.Anthropic(),
+      project_name="anthropic-traces"
+  )
+  ```
+</ParamField>
+
+<ParamField path="tags" type="list[str] | None">
+  Tags to attach to all traces from this client.
+  
+  ```python
+  client = wrappers.wrap_anthropic(
+      anthropic.Anthropic(),
+      tags=["production", "claude-3-5"]
+  )
+  ```
+</ParamField>
+
+<ParamField path="metadata" type="dict[str, Any] | None">
+  Metadata to attach to all traces.
+  
+  ```python
+  client = wrappers.wrap_anthropic(
+      anthropic.Anthropic(),
+      metadata={"environment": "prod"}
+  )
+  ```
+</ParamField>
+
+<ParamField path="client_" type="Client | None">
+  Custom LangSmith client to use for tracing.
+</ParamField>
+
+<ResponseField name="return" type="Anthropic | AsyncAnthropic">
+  The wrapped client with tracing enabled.
+</ResponseField>
+
+## What gets traced
+
+The wrapper automatically traces:
+
+- **Messages API**: `client.messages.create()`
+- **Streaming responses**: Both sync and async streaming
+- **Token usage**: Input/output tokens and cache statistics
+- **Model parameters**: Temperature, max_tokens, top_p, etc.
+- **Tool use**: Tool calls and responses
+- **Thinking blocks**: Extended thinking with Claude 3.7 Sonnet
+- **Error handling**: Failed requests are traced with error info
+
+## Examples
+
+### Basic message
+
+```python
+from langsmith import wrappers
+import anthropic
+
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+response = client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1024,
+    messages=[
+        {"role": "user", "content": "What is LangSmith?"}
+    ]
+)
+
+print(response.content[0].text)
+# Automatically traced to LangSmith
+```
+
+### System prompts
+
+```python
+response = client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1024,
+    system="You are a helpful AI assistant.",
+    messages=[
+        {"role": "user", "content": "Hello!"}
+    ]
+)
+# System prompt is included in trace
+```
+
+### Streaming responses
+
+```python
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+with client.messages.stream(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Write a haiku"}]
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+
+# Full stream is collected and traced
+```
+
+### Async client
+
+```python
+import asyncio
+from langsmith import wrappers
+import anthropic
+
+async_client = wrappers.wrap_anthropic(anthropic.AsyncAnthropic())
+
+async def generate():
+    response = await async_client.messages.create(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": "Hello!"}]
+    )
+    return response.content[0].text
+
+result = asyncio.run(generate())
+```
+
+### Async streaming
+
+```python
+async_client = wrappers.wrap_anthropic(anthropic.AsyncAnthropic())
+
+async def stream_generate():
+    async with async_client.messages.stream(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": "Count to 10"}]
+    ) as stream:
+        async for text in stream.text_stream:
+            print(text, end="", flush=True)
+
+await stream_generate()
+```
+
+### Tool use
+
+```python
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+tools = [
+    {
+        "name": "get_weather",
+        "description": "Get weather for a location",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string"}
+            },
+            "required": ["location"]
+        }
+    }
+]
+
+response = client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1024,
+    tools=tools,
+    messages=[{"role": "user", "content": "What's the weather in SF?"}]
+)
+
+# Tool calls are traced with full details
+if response.stop_reason == "tool_use":
+    tool_use = next(block for block in response.content if block.type == "tool_use")
+    print(f"Tool: {tool_use.name}")
+    print(f"Input: {tool_use.input}")
+```
+
+### Extended thinking (Claude 3.7 Sonnet)
+
+```python
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+response = client.messages.create(
+    model="claude-3-7-sonnet-20250219",
+    max_tokens=4000,
+    thinking={
+        "type": "enabled",
+        "budget_tokens": 2000
+    },
+    messages=[
+        {"role": "user", "content": "Solve this complex math problem..."}
+    ]
+)
+
+# Thinking blocks are captured in the trace
+for block in response.content:
+    if block.type == "thinking":
+        print(f"Thinking: {block.thinking}")
+    elif block.type == "text":
+        print(f"Answer: {block.text}")
+```
+
+### Within traced functions
+
+```python
+from langsmith import traceable, wrappers
+import anthropic
+
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+@traceable
+def answer_question(question: str) -> str:
+    # Anthropic call is traced as a child of answer_question
+    response = client.messages.create(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": question}]
+    )
+    return response.content[0].text
+
+answer = answer_question("What is 2+2?")
+# Creates nested trace: answer_question > messages.create
+```
+
+### Prompt caching
+
+```python
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+# Large context with caching
+response = client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1024,
+    system=[
+        {
+            "type": "text",
+            "text": "Very long system prompt...",
+            "cache_control": {"type": "ephemeral"}
+        }
+    ],
+    messages=[{"role": "user", "content": "Question about the context"}]
+)
+
+# Cache statistics are included in trace metadata
+print(f"Cache read tokens: {response.usage.cache_read_input_tokens}")
+print(f"Cache creation tokens: {response.usage.cache_creation_input_tokens}")
+```
+
+## Captured metadata
+
+The wrapper automatically captures:
+
+- **Model name**: e.g., `"claude-3-5-sonnet-20241022"`
+- **Provider**: `"anthropic"`
+- **Model type**: `"chat"`
+- **Temperature**: If specified
+- **Max tokens**: Token limit
+- **Top-p/Top-k**: If specified
+- **Token usage**: Including cache read/creation statistics
+- **Stop reason**: Why generation stopped
+- **Thinking tokens**: For extended thinking mode
+- **Invocation parameters**: Request parameters
+
+## Integration with testing
+
+Use with `@test` decorator for cached testing:
+
+```python
+import pytest
+from langsmith import test, wrappers
+import anthropic
+
+# Set LANGSMITH_TEST_CACHE=tests/cassettes
+
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+@test(cached_hosts=["api.anthropic.com"])
+def test_anthropic_response():
+    response = client.messages.create(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=100,
+        messages=[{"role": "user", "content": "Say hello"}]
+    )
+    
+    assert "hello" in response.content[0].text.lower()
+    # First run: real API call (cached)
+    # Subsequent runs: instant (from cache)
+```
+
+## Best practices
+
+1. **Wrap once at initialization**: Don't wrap repeatedly
+   ```python
+   # Good
+   client = wrappers.wrap_anthropic(anthropic.Anthropic())
+   
+   # Bad
+   def my_function():
+       client = wrappers.wrap_anthropic(anthropic.Anthropic())  # Don't
+   ```
+
+2. **Use with environment variables**: Configure globally
+   ```python
+   import os
+   os.environ["LANGCHAIN_PROJECT"] = "my-project"
+   
+   client = wrappers.wrap_anthropic(anthropic.Anthropic())
+   ```
+
+3. **Combine with @traceable**: For nested traces
+   ```python
+   @traceable
+   def my_pipeline(input: str):
+       result = client.messages.create(...)  # Traced as child
+       return result
+   ```
+
+4. **Handle errors gracefully**: Errors are automatically traced
+   ```python
+   try:
+       response = client.messages.create(...)
+   except anthropic.APIError as e:
+       # Error is captured in trace
+       print(f"API error: {e}")
+   ```

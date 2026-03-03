@@ -1,0 +1,309 @@
+---
+title: Evaluator types
+description: Types and interfaces for creating custom evaluators
+---
+
+The LangSmith SDK provides several types for creating custom evaluators that can assess your LLM application's outputs.
+
+## EvaluationResult
+
+The result returned by an evaluator.
+
+```typescript
+interface EvaluationResult {
+  key: string;
+  score?: number | boolean | null;
+  value?: number | boolean | string | object | null;
+  comment?: string;
+  correction?: Record<string, unknown>;
+  evaluatorInfo?: Record<string, unknown>;
+  sourceRunId?: string;
+  targetRunId?: string;
+  feedbackConfig?: FeedbackConfig;
+}
+```
+
+<ParamField path="key" type="string" required>
+  The name of the evaluation metric (e.g., "accuracy", "relevance").
+</ParamField>
+
+<ParamField path="score" type="number | boolean | null">
+  The numeric or boolean score for the evaluation.
+</ParamField>
+
+<ParamField path="value" type="number | boolean | string | object | null">
+  The value of the evaluation result. Can be used for non-numeric metrics.
+</ParamField>
+
+<ParamField path="comment" type="string">
+  A comment or explanation for the evaluation.
+</ParamField>
+
+<ParamField path="correction" type="Record<string, unknown>">
+  A correction record if the output should be modified.
+</ParamField>
+
+<ParamField path="evaluatorInfo" type="Record<string, unknown>">
+  Information about the evaluator that produced this result.
+</ParamField>
+
+<ParamField path="sourceRunId" type="string">
+  The source run ID of the evaluation result. If set, a link to the source run will be available in the UI.
+</ParamField>
+
+<ParamField path="targetRunId" type="string">
+  The target run ID of the evaluation result. If not set, the target run ID is assumed to be the root of the trace.
+</ParamField>
+
+<ParamField path="feedbackConfig" type="FeedbackConfig">
+  Configuration that defines how a feedback key should be interpreted.
+</ParamField>
+
+## EvaluationResults
+
+Batch evaluation results, if your evaluator wishes to return multiple scores.
+
+```typescript
+interface EvaluationResults {
+  results: Array<EvaluationResult>;
+}
+```
+
+## RunEvaluator
+
+Interface for evaluators that assess individual runs.
+
+```typescript
+interface RunEvaluator {
+  evaluateRun(
+    run: Run,
+    example?: Example,
+    options?: Partial<RunTreeConfig>
+  ): Promise<EvaluationResult | EvaluationResults>;
+}
+```
+
+### Creating a custom RunEvaluator
+
+```typescript
+class MyCustomEvaluator implements RunEvaluator {
+  async evaluateRun(
+    run: Run,
+    example?: Example
+  ): Promise<EvaluationResult> {
+    // Your evaluation logic
+    const score = this.calculateScore(run.outputs, example?.outputs);
+    
+    return {
+      key: "custom_metric",
+      score,
+      comment: "Evaluation complete",
+    };
+  }
+  
+  private calculateScore(outputs: any, referenceOutputs: any): number {
+    // Your scoring logic
+    return 0.85;
+  }
+}
+
+const evaluator = new MyCustomEvaluator();
+```
+
+## runEvaluator()
+
+Wrapper to convert a function into a RunEvaluator.
+
+```typescript
+import { runEvaluator } from "langsmith/evaluation";
+
+const myEvaluator = runEvaluator(
+  async ({ run, example, inputs, outputs, referenceOutputs }) => {
+    // Your evaluation logic
+    return {
+      key: "accuracy",
+      score: outputs.answer === referenceOutputs?.answer ? 1 : 0,
+    };
+  }
+);
+```
+
+## Function evaluator signatures
+
+Evaluators can accept arguments in multiple ways:
+
+### Object parameter (recommended)
+
+```typescript
+const evaluator = async ({
+  run,
+  example,
+  inputs,
+  outputs,
+  referenceOutputs,
+  attachments,
+}) => {
+  return {
+    key: "metric",
+    score: calculateScore(outputs, referenceOutputs),
+  };
+};
+```
+
+### Legacy run/example parameters
+
+```typescript
+const evaluator = async (run: Run, example?: Example) => {
+  return {
+    key: "metric",
+    score: calculateScore(run.outputs, example?.outputs),
+  };
+};
+```
+
+## Category
+
+Represents a categorical class for feedback.
+
+```typescript
+interface Category {
+  value?: number;
+  label: string;
+}
+```
+
+## FeedbackConfig
+
+Configuration for how feedback should be interpreted.
+
+```typescript
+interface FeedbackConfig {
+  type: "continuous" | "categorical" | "freeform";
+  min?: number | null;
+  max?: number | null;
+  categories?: Category[] | null;
+}
+```
+
+### Continuous feedback
+
+```typescript
+const result: EvaluationResult = {
+  key: "accuracy",
+  score: 0.85,
+  feedbackConfig: {
+    type: "continuous",
+    min: 0,
+    max: 1,
+  },
+};
+```
+
+### Categorical feedback
+
+```typescript
+const result: EvaluationResult = {
+  key: "sentiment",
+  score: 1,
+  feedbackConfig: {
+    type: "categorical",
+    categories: [
+      { value: 0, label: "negative" },
+      { value: 1, label: "neutral" },
+      { value: 2, label: "positive" },
+    ],
+  },
+};
+```
+
+### Freeform feedback
+
+```typescript
+const result: EvaluationResult = {
+  key: "comments",
+  value: "This is a great response",
+  feedbackConfig: {
+    type: "freeform",
+  },
+};
+```
+
+## Example evaluators
+
+### Exact match evaluator
+
+```typescript
+const exactMatch = async ({ outputs, referenceOutputs }) => {
+  return {
+    key: "exact_match",
+    score: outputs.answer === referenceOutputs?.answer ? 1 : 0,
+    feedbackConfig: {
+      type: "categorical",
+      categories: [
+        { value: 0, label: "incorrect" },
+        { value: 1, label: "correct" },
+      ],
+    },
+  };
+};
+```
+
+### LLM-as-judge evaluator
+
+```typescript
+import OpenAI from "openai";
+
+const llmJudge = async ({ inputs, outputs, referenceOutputs }) => {
+  const openai = new OpenAI();
+  
+  const response = await openai.chat.completions.create({
+    model: "gpt-4",
+    messages: [
+      {
+        role: "system",
+        content: "Rate the quality of this answer from 0-10.",
+      },
+      {
+        role: "user",
+        content: `Question: ${inputs.query}\nAnswer: ${outputs.answer}\nReference: ${referenceOutputs?.answer}`,
+      },
+    ],
+  });
+  
+  const score = parseInt(response.choices[0].message.content || "0");
+  
+  return {
+    key: "llm_judge_quality",
+    score: score / 10,
+    comment: response.choices[0].message.content,
+    feedbackConfig: {
+      type: "continuous",
+      min: 0,
+      max: 1,
+    },
+  };
+};
+```
+
+### Multi-metric evaluator
+
+```typescript
+const multiMetric = async ({ outputs, referenceOutputs }) => {
+  return {
+    results: [
+      {
+        key: "exact_match",
+        score: outputs.answer === referenceOutputs?.answer ? 1 : 0,
+      },
+      {
+        key: "answer_length",
+        score: outputs.answer.length,
+      },
+      {
+        key: "has_sources",
+        score: outputs.sources?.length > 0 ? 1 : 0,
+      },
+    ],
+  };
+};
+```

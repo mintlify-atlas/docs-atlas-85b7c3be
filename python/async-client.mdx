@@ -1,0 +1,287 @@
+---
+title: AsyncClient
+description: Asynchronous client for interacting with the LangSmith API
+---
+
+The `AsyncClient` class provides an async interface for interacting with the LangSmith API. It uses `httpx` for async HTTP requests and is ideal for async applications.
+
+## Constructor
+
+```python
+from langsmith import AsyncClient
+
+client = AsyncClient(
+    api_url="https://api.smith.langchain.com",
+    api_key="your-api-key"
+)
+```
+
+<ParamField path="api_url" type="str | None">
+  URL for the LangSmith API. Defaults to the `LANGCHAIN_ENDPOINT` or `LANGSMITH_ENDPOINT` environment variable.
+</ParamField>
+
+<ParamField path="api_key" type="str | None">
+  API key for authentication. Defaults to the `LANGCHAIN_API_KEY` or `LANGSMITH_API_KEY` environment variable.
+</ParamField>
+
+<ParamField path="timeout_ms" type="int | tuple[int, int, int, int] | None">
+  Timeout for requests in milliseconds. Can be a single value or a tuple of timeouts.
+</ParamField>
+
+<ParamField path="retry_config" type="Mapping[str, Any] | None">
+  Configuration for request retries. Default is `{"max_retries": 3}`.
+</ParamField>
+
+<ParamField path="web_url" type="str | None">
+  URL for the LangSmith web application.
+</ParamField>
+
+<ParamField path="disable_prompt_cache" type="bool">
+  Whether to disable prompt caching for this client. Default is `False`.
+</ParamField>
+
+## Usage with context manager
+
+The async client should be used as an async context manager:
+
+```python
+async with AsyncClient() as client:
+    await client.acreate_run(
+        name="my-chain",
+        inputs={"query": "What is LangSmith?"},
+        run_type="chain"
+    )
+```
+
+## Core methods
+
+### acreate_run
+
+Asynchronously create a new run in LangSmith.
+
+```python
+await client.acreate_run(
+    name="my-chain",
+    inputs={"query": "What is LangSmith?"},
+    run_type="chain",
+    project_name="my-project"
+)
+```
+
+<ParamField path="name" type="str" required>
+  Name of the run.
+</ParamField>
+
+<ParamField path="inputs" type="dict[str, Any]" required>
+  Input data for the run.
+</ParamField>
+
+<ParamField path="run_type" type="str" required>
+  Type of run: `"llm"`, `"chain"`, `"tool"`, `"retriever"`, or `"prompt"`.
+</ParamField>
+
+<ParamField path="project_name" type="str | None">
+  Project to log the run to.
+</ParamField>
+
+<ParamField path="run_id" type="UUID | str | None">
+  Unique identifier for the run.
+</ParamField>
+
+<ParamField path="parent_run_id" type="UUID | str | None">
+  ID of the parent run for nested traces.
+</ParamField>
+
+<ParamField path="tags" type="list[str] | None">
+  Tags for filtering and organization.
+</ParamField>
+
+<ParamField path="metadata" type="dict[str, Any] | None">
+  Additional metadata.
+</ParamField>
+
+### aupdate_run
+
+Asynchronously update an existing run.
+
+```python
+await client.aupdate_run(
+    run_id=run_id,
+    outputs={"answer": "LangSmith is a platform for..."},
+    end_time=datetime.now()
+)
+```
+
+<ParamField path="run_id" type="UUID | str" required>
+  ID of the run to update.
+</ParamField>
+
+<ParamField path="outputs" type="dict[str, Any] | None">
+  Output data from the run.
+</ParamField>
+
+<ParamField path="error" type="str | None">
+  Error message if the run failed.
+</ParamField>
+
+<ParamField path="end_time" type="datetime | None">
+  End time of the run.
+</ParamField>
+
+### acreate_feedback
+
+Asynchronously create feedback for a run.
+
+```python
+await client.acreate_feedback(
+    run_id=run_id,
+    key="accuracy",
+    score=0.95
+)
+```
+
+<ParamField path="run_id" type="UUID | str" required>
+  ID of the run to attach feedback to.
+</ParamField>
+
+<ParamField path="key" type="str" required>
+  Name of the metric.
+</ParamField>
+
+<ParamField path="score" type="float | int | bool | None">
+  Numeric score.
+</ParamField>
+
+<ParamField path="comment" type="str | None">
+  Explanation for the feedback.
+</ParamField>
+
+## Dataset methods
+
+### acreate_dataset
+
+Asynchronously create a new dataset.
+
+```python
+dataset = await client.acreate_dataset(
+    dataset_name="my-dataset",
+    description="QA pairs for evaluation"
+)
+```
+
+<ParamField path="dataset_name" type="str" required>
+  Name of the dataset.
+</ParamField>
+
+<ParamField path="description" type="str | None">
+  Description of the dataset.
+</ParamField>
+
+<ResponseField name="return" type="Dataset">
+  The created dataset object.
+</ResponseField>
+
+### acreate_example
+
+Asynchronously add an example to a dataset.
+
+```python
+example = await client.acreate_example(
+    inputs={"question": "What is LangSmith?"},
+    outputs={"answer": "A platform for LLM development"},
+    dataset_id=dataset.id
+)
+```
+
+<ParamField path="inputs" type="dict[str, Any]" required>
+  Input data for the example.
+</ParamField>
+
+<ParamField path="outputs" type="dict[str, Any] | None">
+  Expected output data.
+</ParamField>
+
+<ParamField path="dataset_id" type="UUID | str" required>
+  ID of the dataset.
+</ParamField>
+
+<ResponseField name="return" type="Example">
+  The created example object.
+</ResponseField>
+
+### alist_datasets
+
+Asynchronously list all datasets.
+
+```python
+async for dataset in client.alist_datasets():
+    print(dataset.name)
+```
+
+<ResponseField name="return" type="AsyncIterator[Dataset]">
+  Async iterator of dataset objects.
+</ResponseField>
+
+## Prompt methods
+
+### apull_prompt
+
+Asynchronously pull a prompt from the hub.
+
+```python
+prompt = await client.apull_prompt("my-prompt")
+```
+
+<ParamField path="prompt_identifier" type="str" required>
+  Prompt identifier in format `"name"`, `"owner/name"`, or with commit hash.
+</ParamField>
+
+<ParamField path="include_model" type="bool | None">
+  Whether to include model configuration.
+</ParamField>
+
+<ResponseField name="return" type="Any">
+  The prompt object.
+</ResponseField>
+
+### apush_prompt
+
+Asynchronously push a prompt to the hub.
+
+```python
+await client.apush_prompt(
+    "my-prompt",
+    object=prompt_template
+)
+```
+
+<ParamField path="prompt_identifier" type="str" required>
+  Name for the prompt.
+</ParamField>
+
+<ParamField path="object" type="Any" required>
+  The prompt object to push.
+</ParamField>
+
+<ResponseField name="return" type="str">
+  URL of the pushed prompt.
+</ResponseField>
+
+## Cleanup
+
+Always close the async client when done:
+
+```python
+# Using context manager (recommended)
+async with AsyncClient() as client:
+    # Use client
+    pass
+
+# Or manually
+client = AsyncClient()
+try:
+    # Use client
+    pass
+finally:
+    await client.aclose()
+```

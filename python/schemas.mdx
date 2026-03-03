@@ -1,0 +1,406 @@
+---
+title: Schemas
+description: Data models and type definitions for LangSmith API
+---
+
+The `langsmith.schemas` module contains Pydantic models and type definitions for LangSmith data structures.
+
+## Core types
+
+### Run
+
+Represents a single execution trace (span).
+
+```python
+from langsmith.schemas import Run
+
+# Accessing run properties
+def my_evaluator(run: Run, example):
+    print(f"Run ID: {run.id}")
+    print(f"Name: {run.name}")
+    print(f"Type: {run.run_type}")
+    print(f"Inputs: {run.inputs}")
+    print(f"Outputs: {run.outputs}")
+    print(f"Error: {run.error}")
+    print(f"Start: {run.start_time}")
+    print(f"End: {run.end_time}")
+```
+
+<ResponseField name="id" type="UUID">
+  Unique identifier for the run.
+</ResponseField>
+
+<ResponseField name="name" type="str">
+  Name of the run/operation.
+</ResponseField>
+
+<ResponseField name="run_type" type="str">
+  Type: `"llm"`, `"chain"`, `"tool"`, `"retriever"`, or `"prompt"`.
+</ResponseField>
+
+<ResponseField name="inputs" type="dict[str, Any]">
+  Input data for the run.
+</ResponseField>
+
+<ResponseField name="outputs" type="dict[str, Any] | None">
+  Output data from the run.
+</ResponseField>
+
+<ResponseField name="error" type="str | None">
+  Error message if the run failed.
+</ResponseField>
+
+<ResponseField name="start_time" type="datetime">
+  When the run started.
+</ResponseField>
+
+<ResponseField name="end_time" type="datetime | None">
+  When the run ended.
+</ResponseField>
+
+<ResponseField name="parent_run_id" type="UUID | None">
+  ID of the parent run for nested traces.
+</ResponseField>
+
+<ResponseField name="trace_id" type="UUID">
+  ID of the root trace.
+</ResponseField>
+
+<ResponseField name="dotted_order" type="str">
+  Hierarchical position in trace tree.
+</ResponseField>
+
+<ResponseField name="tags" type="list[str]">
+  Tags attached to the run.
+</ResponseField>
+
+<ResponseField name="metadata" type="dict[str, Any]">
+  Metadata attached to the run.
+</ResponseField>
+
+<ResponseField name="session_id" type="UUID | None">
+  Project/session ID.
+</ResponseField>
+
+### Example
+
+Represents a dataset example (record).
+
+```python
+from langsmith.schemas import Example
+
+def my_evaluator(run, example: Example):
+    print(f"Example ID: {example.id}")
+    print(f"Dataset: {example.dataset_id}")
+    print(f"Inputs: {example.inputs}")
+    print(f"Outputs: {example.outputs}")  # Ground truth
+    print(f"Metadata: {example.metadata}")
+```
+
+<ResponseField name="id" type="UUID">
+  Unique identifier for the example.
+</ResponseField>
+
+<ResponseField name="dataset_id" type="UUID">
+  ID of the dataset this example belongs to.
+</ResponseField>
+
+<ResponseField name="inputs" type="dict[str, Any] | None">
+  Input data for the example.
+</ResponseField>
+
+<ResponseField name="outputs" type="dict[str, Any] | None">
+  Expected output data (ground truth).
+</ResponseField>
+
+<ResponseField name="metadata" type="dict[str, Any] | None">
+  Additional metadata.
+</ResponseField>
+
+<ResponseField name="created_at" type="datetime">
+  When the example was created.
+</ResponseField>
+
+<ResponseField name="modified_at" type="datetime | None">
+  When the example was last modified.
+</ResponseField>
+
+<ResponseField name="source_run_id" type="UUID | None">
+  ID of the run this example was created from.
+</ResponseField>
+
+<ResponseField name="url" type="str | None">
+  URL to view the example in the LangSmith UI.
+</ResponseField>
+
+### Dataset
+
+Represents a dataset collection.
+
+```python
+from langsmith.schemas import Dataset
+
+client = Client()
+dataset: Dataset = client.read_dataset(dataset_name="my-dataset")
+
+print(f"Name: {dataset.name}")
+print(f"ID: {dataset.id}")
+print(f"Examples: {dataset.example_count}")
+print(f"URL: {dataset.url}")
+```
+
+<ResponseField name="id" type="UUID">
+  Unique identifier for the dataset.
+</ResponseField>
+
+<ResponseField name="name" type="str">
+  Name of the dataset.
+</ResponseField>
+
+<ResponseField name="description" type="str | None">
+  Description of the dataset.
+</ResponseField>
+
+<ResponseField name="data_type" type="DataType | None">
+  Type of data: `"kv"`, `"llm"`, or `"chat"`.
+</ResponseField>
+
+<ResponseField name="example_count" type="int | None">
+  Number of examples in the dataset.
+</ResponseField>
+
+<ResponseField name="created_at" type="datetime">
+  When the dataset was created.
+</ResponseField>
+
+<ResponseField name="modified_at" type="datetime | None">
+  When the dataset was last modified.
+</ResponseField>
+
+<ResponseField name="url" type="str | None">
+  URL to view the dataset in the LangSmith UI.
+</ResponseField>
+
+## Create/Update types
+
+### ExampleCreate
+
+Used for creating new examples.
+
+```python
+from langsmith.schemas import ExampleCreate
+
+example = ExampleCreate(
+    inputs={"question": "What is LangSmith?"},
+    outputs={"answer": "A platform for LLM development"},
+    metadata={"source": "docs"},
+    split=["train"]
+)
+
+client.create_example(
+    dataset_id=dataset.id,
+    **example.dict()
+)
+```
+
+<ParamField path="inputs" type="dict[str, Any] | None">
+  Input data.
+</ParamField>
+
+<ParamField path="outputs" type="dict[str, Any] | None">
+  Expected outputs.
+</ParamField>
+
+<ParamField path="metadata" type="dict[str, Any] | None">
+  Metadata.
+</ParamField>
+
+<ParamField path="split" type="str | list[str] | None">
+  Dataset splits (e.g., `"train"`, `"test"`).
+</ParamField>
+
+<ParamField path="attachments" type="dict[str, Attachment] | None">
+  File attachments.
+</ParamField>
+
+<ParamField path="id" type="UUID | None">
+  Custom ID for the example.
+</ParamField>
+
+### ExampleUpdate
+
+Used for updating existing examples.
+
+```python
+from langsmith.schemas import ExampleUpdate
+
+update = ExampleUpdate(
+    id=example.id,
+    inputs={"question": "Updated question"},
+    metadata={"revised": True}
+)
+
+client.update_example(**update.dict())
+```
+
+## Attachment handling
+
+### Attachment
+
+For uploading files with examples or runs.
+
+```python
+from langsmith.schemas import Attachment
+from pathlib import Path
+
+# From bytes
+attachment = Attachment(
+    mime_type="text/plain",
+    data=b"file contents"
+)
+
+# From file path
+attachment = Attachment(
+    mime_type="image/png",
+    data=Path("image.png")
+)
+
+# Use in examples
+example = client.create_example(
+    dataset_id=dataset.id,
+    inputs={"query": "Analyze this image"},
+    attachments={
+        "input_image": attachment
+    }
+)
+```
+
+<ParamField path="mime_type" type="str" required>
+  MIME type of the attachment (e.g., `"text/plain"`, `"image/png"`).
+</ParamField>
+
+<ParamField path="data" type="bytes | Path" required>
+  File contents as bytes or path to file.
+</ParamField>
+
+## Enums
+
+### DataType
+
+Dataset types.
+
+```python
+from langsmith.schemas import DataType
+
+DataType.kv      # Key-value pairs
+DataType.llm     # LLM completion format
+DataType.chat    # Chat message format
+```
+
+## Score types
+
+### SCORE_TYPE
+
+Valid score types for feedback.
+
+```python
+from langsmith.schemas import SCORE_TYPE
+
+# Union of: StrictBool | StrictInt | StrictFloat | None
+score: SCORE_TYPE = 0.95
+score: SCORE_TYPE = 1
+score: SCORE_TYPE = True
+```
+
+### VALUE_TYPE
+
+Valid value types for non-numeric feedback.
+
+```python
+from langsmith.schemas import VALUE_TYPE
+
+# Union of: dict | str | StrictBool | StrictInt | StrictFloat | None
+value: VALUE_TYPE = "good"
+value: VALUE_TYPE = {"category": "excellent", "details": "..."}
+```
+
+## Usage metadata
+
+### UsageMetadata
+
+Token usage information for LLM calls.
+
+```python
+from langsmith.schemas import UsageMetadata, InputTokenDetails
+
+usage = UsageMetadata(
+    input_tokens=100,
+    output_tokens=50,
+    total_tokens=150,
+    input_token_details=InputTokenDetails(
+        cache_read=20
+    )
+)
+```
+
+<ResponseField name="input_tokens" type="int">
+  Number of input tokens.
+</ResponseField>
+
+<ResponseField name="output_tokens" type="int">
+  Number of output tokens.
+</ResponseField>
+
+<ResponseField name="total_tokens" type="int">
+  Total tokens (input + output).
+</ResponseField>
+
+<ResponseField name="input_token_details" type="InputTokenDetails | None">
+  Detailed breakdown of input tokens (cache hits, etc.).
+</ResponseField>
+
+<ResponseField name="output_token_details" type="OutputTokenDetails | None">
+  Detailed breakdown of output tokens (reasoning tokens, etc.).
+</ResponseField>
+
+## Working with schemas
+
+### Type annotations
+
+```python
+from langsmith.schemas import Run, Example
+from langsmith.evaluation import EvaluationResult
+
+def my_evaluator(run: Run, example: Example | None) -> EvaluationResult:
+    """Type-safe evaluator function."""
+    prediction = run.outputs.get("answer")
+    reference = example.outputs.get("answer") if example else None
+    
+    return EvaluationResult(
+        key="accuracy",
+        score=1.0 if prediction == reference else 0.0
+    )
+```
+
+### Serialization
+
+All schema types are Pydantic models and support standard serialization:
+
+```python
+from langsmith import Client
+
+client = Client()
+dataset = client.read_dataset(dataset_name="my-dataset")
+
+# To dict
+data = dataset.dict()
+
+# To JSON
+import json
+json_str = dataset.json()
+parsed = json.loads(json_str)
+
+# From dict
+from langsmith.schemas import Dataset
+dataset = Dataset(**data)
+```

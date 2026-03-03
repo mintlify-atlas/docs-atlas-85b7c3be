@@ -1,0 +1,417 @@
+---
+title: Test integrations
+description: Integrate LangSmith with Jest, Vitest, and Pytest for testing and evaluation
+---
+
+LangSmith provides native integrations with popular testing frameworks to streamline evaluation workflows. These integrations automatically create datasets, run experiments, and log results.
+
+## Vitest integration
+
+The Vitest integration allows you to run LangSmith evaluations using familiar Vitest syntax.
+
+### Installation
+
+```bash
+npm install langsmith vitest
+```
+
+### Basic usage
+
+Use `ls.test()` and `ls.describe()` to define evaluation test cases:
+
+```typescript
+import * as ls from "langsmith/vitest";
+
+ls.describe("Math evaluation suite", () => {
+  ls.test(
+    "Addition should work correctly",
+    {
+      inputs: { a: 2, b: 3 },
+      referenceOutputs: { result: 5 }
+    },
+    async ({ inputs, referenceOutputs }) => {
+      // Your app logic
+      const result = inputs.a + inputs.b;
+      
+      // Log feedback/scores
+      ls.expect(result).toBe(referenceOutputs.result);
+      
+      // Return value becomes the experiment output
+      return { result };
+    }
+  );
+});
+```
+
+### Testing multiple examples
+
+Use `ls.test.each()` to iterate over multiple test cases:
+
+```typescript
+import * as ls from "langsmith/vitest";
+
+ls.describe("Question answering", () => {
+  ls.test.each([
+    {
+      inputs: { question: "What is 2+2?" },
+      referenceOutputs: { answer: "4" }
+    },
+    {
+      inputs: { question: "What is the capital of France?" },
+      referenceOutputs: { answer: "Paris" }
+    }
+  ])(
+    "Should answer correctly",
+    async ({ inputs, referenceOutputs }) => {
+      const answer = await myQASystem(inputs.question);
+      
+      ls.logFeedback({
+        key: "correctness",
+        score: answer === referenceOutputs.answer ? 1 : 0
+      });
+      
+      return { answer };
+    }
+  );
+});
+```
+
+### Custom evaluators
+
+Wrap evaluator functions with `ls.wrapEvaluator()`:
+
+```typescript
+import * as ls from "langsmith/vitest";
+
+const checkCorrectness = ls.wrapEvaluator(
+  async (run, example) => {
+    const score = run.outputs.answer === example.outputs.answer ? 1 : 0;
+    return { key: "correctness", score };
+  }
+);
+
+ls.describe("Evaluated QA", () => {
+  ls.test(
+    "Answer evaluation",
+    {
+      inputs: { question: "What is AI?" },
+      referenceOutputs: { answer: "Artificial Intelligence" }
+    },
+    async ({ inputs }) => {
+      const answer = await myQASystem(inputs.question);
+      return { answer };
+    }
+  );
+});
+```
+
+### Logging feedback
+
+Use `ls.logFeedback()` to add scores to your experiments:
+
+```typescript
+import * as ls from "langsmith/vitest";
+
+ls.describe("Sentiment analysis", () => {
+  ls.test(
+    "Positive sentiment",
+    {
+      inputs: { text: "I love this product!" },
+      referenceOutputs: { sentiment: "positive" }
+    },
+    async ({ inputs, referenceOutputs }) => {
+      const result = await analyzeSentiment(inputs.text);
+      
+      // Log multiple feedback scores
+      ls.logFeedback({
+        key: "correctness",
+        score: result.sentiment === referenceOutputs.sentiment ? 1 : 0
+      });
+      
+      ls.logFeedback({
+        key: "confidence",
+        score: result.confidence
+      });
+      
+      return result;
+    }
+  );
+});
+```
+
+### Running tests
+
+Run your tests with Vitest:
+
+```bash
+# Run all tests
+vitest
+
+# Run specific test file
+vitest tests/eval.test.ts
+```
+
+Set `LANGSMITH_TEST_TRACKING=false` to disable LangSmith tracking for local-only testing:
+
+```bash
+LANGSMITH_TEST_TRACKING=false vitest
+```
+
+## Jest integration
+
+Jest integration is similar to Vitest but uses Jest's testing primitives.
+
+### Installation
+
+```bash
+npm install langsmith jest
+```
+
+### Basic usage
+
+```typescript
+import * as ls from "langsmith/jest";
+
+ls.describe("Calculator tests", () => {
+  ls.test(
+    "Multiplication",
+    {
+      inputs: { x: 4, y: 5 },
+      referenceOutputs: { product: 20 }
+    },
+    async ({ inputs, referenceOutputs }) => {
+      const result = inputs.x * inputs.y;
+      ls.expect(result).toBe(referenceOutputs.product);
+      return { product: result };
+    }
+  );
+});
+```
+
+All Vitest patterns (`.each()`, `logFeedback()`, `wrapEvaluator()`) work identically in Jest.
+
+## Pytest integration
+
+The Pytest plugin enables LangSmith evaluations within Python test suites.
+
+### Installation
+
+```bash
+pip install langsmith pytest
+```
+
+### Configuration
+
+Add the LangSmith plugin to `pytest.ini` or `pyproject.toml`:
+
+```ini
+# pytest.ini
+[pytest]
+plugins = langsmith.pytest_plugin
+```
+
+Or:
+
+```toml
+# pyproject.toml
+[tool.pytest.ini_options]
+plugins = ["langsmith.pytest_plugin"]
+```
+
+### Basic usage
+
+Use the `@pytest.mark.langsmith` decorator:
+
+```python
+import pytest
+from langsmith.testing import log_feedback, log_outputs
+
+@pytest.mark.langsmith
+def test_addition():
+    """Test basic addition."""
+    result = 2 + 2
+    
+    # Log the output
+    log_outputs({"result": result})
+    
+    # Log feedback
+    log_feedback(key="correctness", score=1.0 if result == 4 else 0.0)
+    
+    assert result == 4
+```
+
+### Parametrized tests
+
+Use `@pytest.mark.parametrize` for multiple examples:
+
+```python
+import pytest
+from langsmith.testing import log_feedback, log_outputs
+
+@pytest.mark.langsmith
+@pytest.mark.parametrize(
+    "question,expected_answer",
+    [
+        ("What is 2+2?", "4"),
+        ("What is the capital of France?", "Paris"),
+        ("What is Python?", "A programming language"),
+    ]
+)
+def test_qa_system(question, expected_answer):
+    """Test question answering."""
+    answer = my_qa_system(question)
+    
+    log_outputs({"answer": answer})
+    
+    # Score correctness
+    is_correct = answer.lower() == expected_answer.lower()
+    log_feedback(key="correctness", score=1.0 if is_correct else 0.0)
+    
+    assert is_correct
+```
+
+### Using fixtures
+
+LangSmith works with pytest fixtures:
+
+```python
+import pytest
+from langsmith.testing import log_feedback, log_outputs
+
+@pytest.fixture
+def qa_model():
+    """Load the QA model."""
+    return load_my_model()
+
+@pytest.mark.langsmith
+def test_with_fixture(qa_model):
+    """Test using a fixture."""
+    result = qa_model.answer("What is AI?")
+    
+    log_outputs({"answer": result})
+    log_feedback(key="length", score=len(result))
+    
+    assert len(result) > 0
+```
+
+### Logging inputs and reference outputs
+
+```python
+import pytest
+from langsmith.testing import (
+    log_inputs,
+    log_outputs,
+    log_reference_outputs,
+    log_feedback
+)
+
+@pytest.mark.langsmith
+def test_full_example():
+    """Complete example with all logging functions."""
+    # Log inputs
+    log_inputs({"query": "What is machine learning?"})
+    
+    # Run your app
+    result = my_app("What is machine learning?")
+    
+    # Log outputs
+    log_outputs({"answer": result})
+    
+    # Log expected outputs
+    log_reference_outputs({"answer": "A subset of AI"})
+    
+    # Log feedback/scores
+    log_feedback(key="relevance", score=0.9)
+    log_feedback(key="conciseness", score=0.8)
+    
+    assert result is not None
+```
+
+### Running tests
+
+Run pytest normally:
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_eval.py
+
+# Run with LangSmith output formatting
+pytest --langsmith-output
+
+# Disable LangSmith tracking
+LANGSMITH_TEST_TRACKING=false pytest
+```
+
+## Disabling test tracking
+
+To run tests locally without creating experiments in LangSmith:
+
+<CodeGroup>
+
+```bash Vitest/Jest
+LANGSMITH_TEST_TRACKING=false vitest
+```
+
+```bash Pytest
+LANGSMITH_TEST_TRACKING=false pytest
+```
+
+</CodeGroup>
+
+## Best practices
+
+<Steps>
+
+### Organize by dataset
+
+Each `describe` block corresponds to a dataset. Group related test cases together:
+
+```typescript
+ls.describe("Customer support QA", () => {
+  // All tests here belong to the "Customer support QA" dataset
+});
+```
+
+### Use reference outputs
+
+Always provide `referenceOutputs` for comparison and evaluation:
+
+```typescript
+ls.test(
+  "Test case",
+  {
+    inputs: { query: "..." },
+    referenceOutputs: { answer: "..." }  // Include expected outputs
+  },
+  async ({ inputs, referenceOutputs }) => {
+    // ...
+  }
+);
+```
+
+### Log meaningful feedback
+
+Use descriptive feedback keys and normalized scores (0-1):
+
+```typescript
+ls.logFeedback({ key: "correctness", score: 1.0 });
+ls.logFeedback({ key: "latency_ms", score: 150 });
+ls.logFeedback({ key: "user_satisfaction", score: 0.85 });
+```
+
+### Return structured outputs
+
+Return objects from test functions to capture full results:
+
+```typescript
+return {
+  answer: "Paris",
+  confidence: 0.95,
+  sources: ["doc1", "doc2"]
+};
+```
+
+</Steps>

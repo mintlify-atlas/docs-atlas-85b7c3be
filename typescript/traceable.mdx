@@ -1,0 +1,269 @@
+---
+title: traceable()
+description: Decorator for automatic tracing of functions
+---
+
+The `traceable()` function is a higher-order function that wraps your code to automatically create traces in LangSmith. It handles creating runs, capturing inputs/outputs, and managing the trace tree.
+
+## Basic usage
+
+```typescript
+import { traceable } from "langsmith/traceable";
+
+const myFunction = traceable(
+  async (input: string) => {
+    return `Hello, ${input}!`;
+  },
+  { name: "my-function", run_type: "chain" }
+);
+
+const result = await myFunction("world");
+```
+
+## Signature
+
+```typescript
+function traceable<Func extends (...args: any[]) => any>(
+  wrappedFunc: Func,
+  config?: TraceableConfig<Func>
+): TraceableFunction<Func>
+```
+
+<ParamField path="wrappedFunc" type="Func" required>
+  The function to be traced. Can be sync or async.
+</ParamField>
+
+<ParamField path="config" type="TraceableConfig<Func>">
+  Configuration for the trace
+  
+  <Accordion title="TraceableConfig properties">
+    <ParamField path="name" type="string">
+      Name for the run. Defaults to the function name or "lambda".
+    </ParamField>
+    
+    <ParamField path="run_type" type="string">
+      The type of run (e.g., "llm", "chain", "tool", "retriever").
+    </ParamField>
+    
+    <ParamField path="project_name" type="string">
+      The name of the project/session to log to.
+    </ParamField>
+    
+    <ParamField path="metadata" type="Record<string, any>">
+      Metadata to attach to the run.
+    </ParamField>
+    
+    <ParamField path="tags" type="string[]">
+      Tags for categorizing the run.
+    </ParamField>
+    
+    <ParamField path="client" type="Client">
+      Custom LangSmith client instance.
+    </ParamField>
+    
+    <ParamField path="tracingEnabled" type="boolean">
+      Whether tracing is enabled. Can be used to conditionally disable tracing.
+    </ParamField>
+    
+    <ParamField path="processInputs" type="(inputs: ProcessInputs) => KVMap | Promise<KVMap>">
+      Transform inputs before logging. The input is determined by:
+      - If called with one argument that is an object: the unchanged argument
+      - If called with one argument that is not an object: `{ input: arg }`
+      - If called with multiple arguments: `{ args: [...arguments] }`
+      - If called with no arguments: `{}`
+    </ParamField>
+    
+    <ParamField path="processOutputs" type="(outputs: ProcessOutputs) => KVMap | Promise<KVMap>">
+      Transform outputs before logging. The input is:
+      - If return value is an object: the unchanged return value
+      - If return value is not an object: `{ outputs: returnValue }`
+    </ParamField>
+    
+    <ParamField path="getInvocationParams" type="(...args: Parameters<Func>) => InvocationParamsSchema | undefined">
+      Extract invocation parameters from the arguments. Used to properly track provider, model name, and temperature.
+    </ParamField>
+    
+    <ParamField path="extractAttachments" type="(...args: Parameters<Func>) => [Attachments | undefined, KVMap]">
+      Extract attachments from args and return remaining args.
+    </ParamField>
+    
+    <ParamField path="aggregator" type="(args: any[]) => any">
+      Function to aggregate streaming chunks for the final output.
+    </ParamField>
+    
+    <ParamField path="on_start" type="(runTree: RunTree | undefined) => void">
+      Callback when the run starts.
+    </ParamField>
+    
+    <ParamField path="on_end" type="(runTree: RunTree | undefined) => void">
+      Callback when the run ends.
+    </ParamField>
+  </Accordion>
+</ParamField>
+
+<ResponseField name="TraceableFunction<Func>" type="function">
+  The wrapped function that automatically creates traces when called.
+</ResponseField>
+
+## Nested tracing
+
+Traceable functions automatically create child runs when called within other traceable functions:
+
+```typescript
+const llmCall = traceable(
+  async (prompt: string) => {
+    // Make LLM call
+    return "response";
+  },
+  { name: "llm-call", run_type: "llm" }
+);
+
+const chain = traceable(
+  async (input: string) => {
+    const result = await llmCall(input); // Automatically a child run
+    return result;
+  },
+  { name: "chain", run_type: "chain" }
+);
+```
+
+## Processing inputs and outputs
+
+Use `processInputs` and `processOutputs` to transform data before logging:
+
+```typescript
+const myFunction = traceable(
+  async (apiKey: string, prompt: string) => {
+    return { response: "...", metadata: { ... } };
+  },
+  {
+    name: "my-function",
+    processInputs: ({ args }) => ({
+      // Hide API key from logs
+      prompt: args[1],
+    }),
+    processOutputs: ({ outputs }) => ({
+      // Only log the response field
+      response: outputs.response,
+    }),
+  }
+);
+```
+
+## Streaming support
+
+Traceable automatically handles streaming outputs:
+
+```typescript
+const streamingLLM = traceable(
+  async function* (prompt: string) {
+    yield "Hello";
+    yield " ";
+    yield "world";
+  },
+  {
+    name: "streaming-llm",
+    run_type: "llm",
+    aggregator: (chunks) => chunks.join(""),
+  }
+);
+
+for await (const chunk of streamingLLM("Say hello")) {
+  console.log(chunk);
+}
+```
+
+## Invocation parameters
+
+Extract model parameters for better tracking in LangSmith:
+
+```typescript
+const llmCall = traceable(
+  async (config: { model: string; temperature: number; prompt: string }) => {
+    // LLM call
+    return "response";
+  },
+  {
+    name: "llm-call",
+    run_type: "llm",
+    getInvocationParams: (config) => ({
+      ls_provider: "openai",
+      ls_model_type: "chat",
+      ls_model_name: config.model,
+      ls_temperature: config.temperature,
+    }),
+  }
+);
+```
+
+## Manual run tree passing
+
+For environments where AsyncLocalStorage is unreliable, you can manually pass the run tree:
+
+```typescript
+import { traceable, ROOT } from "langsmith/traceable";
+
+const myFunction = traceable(
+  async (input: string) => {
+    return `Hello, ${input}!`;
+  },
+  { name: "my-function" }
+);
+
+// Start a new root trace
+const result = await myFunction(ROOT, "world");
+```
+
+## Conditional tracing
+
+```typescript
+const myFunction = traceable(
+  async (input: string) => {
+    return `Hello, ${input}!`;
+  },
+  {
+    name: "my-function",
+    tracingEnabled: process.env.NODE_ENV === "production",
+  }
+);
+```
+
+## Helper functions
+
+### getCurrentRunTree()
+
+Get the current run tree from async local storage:
+
+```typescript
+import { getCurrentRunTree } from "langsmith/traceable";
+
+const currentRun = getCurrentRunTree();
+if (currentRun) {
+  console.log("Current run ID:", currentRun.id);
+}
+```
+
+### isTraceableFunction()
+
+Check if a function is traceable:
+
+```typescript
+import { isTraceableFunction } from "langsmith/traceable";
+
+const myFunc = traceable(() => "hello", { name: "my-func" });
+console.log(isTraceableFunction(myFunc)); // true
+```
+
+### withRunTree()
+
+Manually set a run tree in async local storage:
+
+```typescript
+import { withRunTree, RunTree } from "langsmith";
+
+const runTree = new RunTree({ name: "my-run", run_type: "chain" });
+
+await withRunTree(runTree, async () => {
+  // Code here will use this run tree
+});
+```

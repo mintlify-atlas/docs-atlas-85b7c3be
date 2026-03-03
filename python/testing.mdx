@@ -1,0 +1,379 @@
+---
+title: Testing
+description: Pytest integration for tracing and evaluating test cases
+---
+
+LangSmith provides pytest integration for tracing test cases, caching LLM responses, and making assertions with the `expect` API.
+
+## test decorator
+
+The `@test` decorator (or `@pytest.mark.langsmith`) traces pytest tests to LangSmith.
+
+```python
+import pytest
+from langsmith import test
+
+@test  # or @pytest.mark.langsmith
+def test_my_function():
+    result = my_function("input")
+    assert result == "expected"
+```
+
+### Parameters
+
+<ParamField path="id" type="UUID | None">
+  Unique identifier for the test case. Auto-generated based on test name if not provided.
+</ParamField>
+
+<ParamField path="output_keys" type="Sequence[str] | None">
+  Keys from test function inputs to extract as expected outputs.
+  
+  ```python
+  @test(output_keys=["expected"])
+  def test_function(input_data, expected):
+      result = process(input_data)
+      assert result == expected
+  # 'expected' is stored as ground truth in LangSmith
+  ```
+</ParamField>
+
+<ParamField path="client" type="Client | None">
+  Custom LangSmith client to use for this test.
+</ParamField>
+
+<ParamField path="test_suite_name" type="str | None">
+  Name of the test suite. Defaults to the package name or environment variable.
+  
+  ```python
+  @test(test_suite_name="integration-tests")
+  def test_integration():
+      pass
+  ```
+</ParamField>
+
+<ParamField path="metadata" type="dict | None">
+  Additional metadata to attach to the test case.
+  
+  ```python
+  @test(metadata={"category": "unit", "priority": "high"})
+  def test_critical_path():
+      pass
+  ```
+</ParamField>
+
+<ParamField path="repetitions" type="int | None">
+  Number of times to repeat the test. Useful for testing variance.
+  
+  ```python
+  @test(repetitions=5)
+  def test_with_variance():
+      # Test runs 5 times to measure consistency
+      result = llm_call()
+      assert "expected" in result
+  ```
+</ParamField>
+
+<ParamField path="cached_hosts" type="Sequence[str] | None">
+  List of hosts to cache requests to. Only applicable when `LANGSMITH_TEST_CACHE` is set.
+  
+  ```python
+  @test(cached_hosts=["api.openai.com"])
+  def test_openai_only_cached():
+      # Only OpenAI calls are cached, others are live
+      pass
+  ```
+</ParamField>
+
+## Request caching
+
+Cache LLM API calls to speed up tests and reduce costs:
+
+```bash
+# Enable caching
+export LANGSMITH_TEST_CACHE=tests/cassettes
+```
+
+```python
+import pytest
+import openai
+from langsmith import wrappers
+
+# Wrap the OpenAI client
+oai_client = wrappers.wrap_openai(openai.Client())
+
+@pytest.mark.langsmith
+def test_openai_completion():
+    response = oai_client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "Say hello"}]
+    )
+    assert "hello" in response.choices[0].message.content.lower()
+    # Response is cached for subsequent runs
+```
+
+### Installation
+
+Caching requires the `vcr` extra:
+
+```bash
+pip install "langsmith[vcr]"
+```
+
+### How it works
+
+1. First run: Real API calls are made and responses cached to disk
+2. Subsequent runs: Cached responses are returned instantly
+3. Cache files are stored in the directory specified by `LANGSMITH_TEST_CACHE`
+4. Commit cache files to version control for consistent CI/CD
+
+### Selective caching
+
+Cache only specific hosts:
+
+```python
+@test(cached_hosts=["api.openai.com", "api.anthropic.com"])
+def test_multi_provider():
+    # Only OpenAI and Anthropic calls are cached
+    # Other API calls are made live
+    openai_response = openai_client.chat.completions.create(...)
+    anthropic_response = anthropic_client.messages.create(...)
+```
+
+## expect API
+
+Make assertions and log scores within test cases.
+
+```python
+import pytest
+from langsmith import expect
+
+@pytest.mark.langsmith
+def test_with_expectations():
+    response = my_llm_function("input")
+    
+    # Assert with automatic feedback logging
+    expect.value(response).to_contain("expected text")
+    
+    # Score without assertion
+    expect.score(0.95, key="quality")
+    
+    # Embedding similarity
+    expect.embedding_distance(
+        prediction=response,
+        reference="expected output"
+    ).to_be_less_than(0.5)
+    
+    # Edit distance
+    expect.edit_distance(
+        prediction=response,
+        reference="expected"
+    ).to_be_less_than(5)
+```
+
+### Methods
+
+#### expect.value
+
+Make assertions on any value.
+
+```python
+expect.value(response).to_contain("hello")
+expect.value(count).to_be_greater_than(5)
+expect.value(result).to_equal(expected)
+expect.value(result).against(lambda x: x > 0)
+```
+
+<Accordion title="Available assertions">
+  - `to_equal(value)`: Exact equality
+  - `to_contain(substring)`: String contains substring
+  - `to_be_greater_than(value)`: Numeric comparison
+  - `to_be_less_than(value)`: Numeric comparison
+  - `to_be_between(min, max)`: Range check
+  - `to_be_approximately(value, precision)`: Approximate equality
+  - `against(func)`: Custom assertion function
+</Accordion>
+
+#### expect.score
+
+Log a score without assertion.
+
+```python
+expect.score(0.85, key="accuracy")
+expect.score(1.23, key="latency_seconds")
+```
+
+<ParamField path="score" type="float" required>
+  Numeric score to log.
+</ParamField>
+
+<ParamField path="key" type="str">
+  Metric name. Defaults to `"score"`.
+</ParamField>
+
+Returns a matcher for optional assertions:
+
+```python
+expect.score(0.85, key="accuracy").to_be_greater_than(0.8)
+```
+
+#### expect.embedding_distance
+
+Compute semantic similarity using embeddings.
+
+```python
+expect.embedding_distance(
+    prediction="The cat sat on the mat",
+    reference="A cat was sitting on a mat",
+    config={"provider": "openai", "model": "text-embedding-3-small"}
+).to_be_less_than(0.3)
+```
+
+<ParamField path="prediction" type="str" required>
+  Predicted text.
+</ParamField>
+
+<ParamField path="reference" type="str" required>
+  Reference text.
+</ParamField>
+
+<ParamField path="config" type="EmbeddingConfig | None">
+  Configuration for the embedding provider.
+  
+  ```python
+  config = {
+      "provider": "openai",  # or "huggingface"
+      "model": "text-embedding-3-small"
+  }
+  ```
+</ParamField>
+
+Returns a matcher with the computed distance:
+
+```python
+matcher = expect.embedding_distance(pred, ref)
+matcher.to_be_less_than(0.5)  # Assert similarity
+```
+
+#### expect.edit_distance
+
+Compute Levenshtein edit distance.
+
+```python
+expect.edit_distance(
+    prediction="hello world",
+    reference="hello word",
+    config={"normalize": True}
+).to_be_less_than(2)
+```
+
+<ParamField path="prediction" type="str" required>
+  Predicted text.
+</ParamField>
+
+<ParamField path="reference" type="str" required>
+  Reference text.
+</ParamField>
+
+<ParamField path="config" type="EditDistanceConfig | None">
+  Configuration options:
+  
+  ```python
+  config = {
+      "normalize": True,  # Normalize by max length
+  }
+  ```
+</ParamField>
+
+## unit decorator
+
+Alias for `@test` that creates a unit test context.
+
+```python
+from langsmith import unit
+
+@unit
+def test_helper_function():
+    result = helper("input")
+    assert result == "output"
+```
+
+Functionally identical to `@test`, but semantically indicates a unit test.
+
+## Complete example
+
+```python
+import pytest
+import openai
+from langsmith import test, expect, wrappers
+
+# Enable caching
+# export LANGSMITH_TEST_CACHE=tests/cassettes
+
+oai_client = wrappers.wrap_openai(openai.Client())
+
+@test(
+    test_suite_name="qa-pipeline",
+    metadata={"category": "integration", "model": "gpt-3.5-turbo"},
+    cached_hosts=["api.openai.com"]
+)
+def test_qa_accuracy():
+    """Test QA pipeline with caching and expectations."""
+    question = "What is the capital of France?"
+    
+    response = oai_client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "Answer questions accurately."},
+            {"role": "user", "content": question}
+        ]
+    )
+    
+    answer = response.choices[0].message.content
+    
+    # Assertions with automatic feedback logging
+    expect.value(answer).to_contain("Paris")
+    
+    # Semantic similarity check
+    expect.embedding_distance(
+        prediction=answer,
+        reference="The capital of France is Paris."
+    ).to_be_less_than(0.3)
+    
+    # Log metrics
+    expect.score(
+        response.usage.total_tokens,
+        key="token_count"
+    ).to_be_less_than(100)
+
+@test(repetitions=3)
+def test_consistency():
+    """Run multiple times to check consistency."""
+    result = llm_generate("test")
+    expect.value(result).to_contain("expected")
+```
+
+## Environment variables
+
+<ParamField path="LANGSMITH_TEST_CACHE" type="str">
+  Directory to store cached API responses. Enables caching when set.
+  
+  ```bash
+  export LANGSMITH_TEST_CACHE=tests/cassettes
+  ```
+</ParamField>
+
+<ParamField path="LANGSMITH_TEST_TRACKING" type="str">
+  Set to `"false"` to disable test tracking.
+  
+  ```bash
+  export LANGSMITH_TEST_TRACKING=false
+  ```
+</ParamField>
+
+## Best practices
+
+1. **Commit cache files**: Check in cached responses for consistent CI/CD
+2. **Use descriptive test names**: They become dataset example names in LangSmith
+3. **Add metadata**: Helps organize and filter tests
+4. **Use `expect` for metrics**: Logs scores alongside test results
+5. **Cache expensive calls**: Speeds up tests and reduces API costs

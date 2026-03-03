@@ -1,0 +1,292 @@
+---
+title: wrapGemini()
+description: Automatic LangSmith tracing for Google Gemini SDK (beta)
+---
+
+<Warning>
+This feature is in beta and may change in future releases.
+</Warning>
+
+The `wrapGemini()` function wraps a Google Gemini client to enable automatic LangSmith tracing for all content generation.
+
+## Installation
+
+```bash
+npm install langsmith @google/genai
+```
+
+## Basic usage
+
+```typescript
+import { GoogleGenAI } from "@google/genai";
+import { wrapGemini } from "langsmith/wrappers/gemini";
+
+const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const wrapped = wrapGemini(client);
+
+const response = await wrapped.models.generateContent({
+  model: "gemini-2.0-flash-exp",
+  contents: "Hello!",
+});
+```
+
+## Signature
+
+```typescript
+function wrapGemini<T extends GoogleGenAIType>(
+  gemini: T,
+  options?: Partial<RunTreeConfig>
+): PatchedGeminiClient<T>
+```
+
+<ParamField path="gemini" type="GoogleGenAI" required>
+  A Google GenAI client instance to wrap.
+</ParamField>
+
+<ParamField path="options" type="Partial<RunTreeConfig>">
+  LangSmith tracing options (same as other wrappers).
+</ParamField>
+
+<ResponseField name="PatchedGeminiClient<T>" type="GoogleGenAI">
+  The wrapped Gemini client with automatic tracing.
+</ResponseField>
+
+## Supported methods
+
+The wrapper automatically traces:
+
+- `models.generateContent()` - Content generation (non-streaming)
+- `models.generateContentStream()` - Streaming content generation
+
+## Features
+
+### Automatic metadata extraction
+
+The wrapper automatically extracts:
+- Provider ("google")
+- Model name
+- Temperature
+- Max tokens
+- Usage metadata (input/output tokens, cached tokens, reasoning tokens)
+
+### Message format transformation
+
+Gemini's format is automatically transformed to a standardized message format:
+
+```typescript
+const response = await wrapped.models.generateContent({
+  model: "gemini-2.0-flash-exp",
+  contents: [
+    {
+      role: "user",
+      parts: [{ text: "What is LangSmith?" }],
+    },
+  ],
+});
+
+// In LangSmith, appears as:
+// messages: [
+//   { role: "user", content: "What is LangSmith?" }
+// ]
+```
+
+### Multimodal support
+
+Images and other media are automatically handled:
+
+```typescript
+const response = await wrapped.models.generateContent({
+  model: "gemini-2.0-flash-exp",
+  contents: [
+    {
+      role: "user",
+      parts: [
+        { text: "What's in this image?" },
+        {
+          inlineData: {
+            mimeType: "image/jpeg",
+            data: base64ImageData,
+          },
+        },
+      ],
+    },
+  ],
+});
+
+// Images are preserved in the trace
+```
+
+### Streaming support
+
+```typescript
+const stream = await wrapped.models.generateContentStream({
+  model: "gemini-2.0-flash-exp",
+  contents: "Count to 5",
+});
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.text || "");
+}
+```
+
+### Usage metadata
+
+Token usage is automatically tracked:
+
+```typescript
+const response = await wrapped.models.generateContent({
+  model: "gemini-2.0-flash-exp",
+  contents: "Hello!",
+});
+
+// Usage metadata automatically includes:
+// - input_tokens (promptTokenCount)
+// - output_tokens (candidatesTokenCount)
+// - total_tokens
+// - cache_read (cachedContentTokenCount)
+// - reasoning tokens (thoughtsTokenCount for thinking models)
+```
+
+### Image generation
+
+Supports image generation with gemini-2.5-flash-image:
+
+```typescript
+const response = await wrapped.models.generateContent({
+  model: "gemini-2.5-flash-image",
+  contents: "A beautiful sunset over mountains",
+});
+
+// Image outputs are captured in the trace
+```
+
+## Function calling
+
+```typescript
+const response = await wrapped.models.generateContent({
+  model: "gemini-2.0-flash-exp",
+  contents: "What's the weather in Paris?",
+  config: {
+    tools: [
+      {
+        functionDeclarations: [
+          {
+            name: "get_weather",
+            description: "Get weather for a location",
+            parameters: {
+              type: "object",
+              properties: {
+                location: { type: "string" },
+              },
+            },
+          },
+        ],
+      },
+    ],
+  },
+});
+
+const functionCall = response.candidates[0].content.parts.find(
+  (p) => "functionCall" in p
+);
+```
+
+## Complete example
+
+```typescript
+import { GoogleGenAI } from "@google/genai";
+import { wrapGemini } from "langsmith/wrappers/gemini";
+
+const client = new GoogleGenAI({ 
+  apiKey: process.env.GEMINI_API_KEY 
+});
+
+const wrapped = wrapGemini(client, {
+  project_name: "my-gemini-project",
+  tags: ["production"],
+});
+
+// Text generation
+const response = await wrapped.models.generateContent({
+  model: "gemini-2.0-flash-exp",
+  contents: "What is LangSmith?",
+  config: {
+    temperature: 0.7,
+    maxOutputTokens: 1000,
+  },
+});
+
+console.log(response.text);
+
+// Streaming
+const stream = await wrapped.models.generateContentStream({
+  model: "gemini-2.0-flash-exp",
+  contents: "Count to 10",
+});
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.text || "");
+}
+
+// Multimodal with image
+const imageResponse = await wrapped.models.generateContent({
+  model: "gemini-2.0-flash-exp",
+  contents: [
+    {
+      role: "user",
+      parts: [
+        { text: "Describe this image" },
+        {
+          inlineData: {
+            mimeType: "image/jpeg",
+            data: base64ImageData,
+          },
+        },
+      ],
+    },
+  ],
+});
+
+console.log(imageResponse.text);
+```
+
+## Thinking models
+
+Supports thinking/reasoning models with thought tracking:
+
+```typescript
+const response = await wrapped.models.generateContent({
+  model: "gemini-2.0-flash-thinking-exp",
+  contents: "Solve this complex problem...",
+});
+
+// Thought content is tracked separately in usage metadata
+```
+
+## Nested tracing
+
+```typescript
+import { traceable } from "langsmith/traceable";
+
+const myChain = traceable(
+  async (input: string) => {
+    const response = await wrapped.models.generateContent({
+      model: "gemini-2.0-flash-exp",
+      contents: input,
+    });
+    
+    return response.text;
+  },
+  { name: "my-chain", run_type: "chain" }
+);
+
+await myChain("Hello!");
+```
+
+## Notes
+
+- The wrapper preserves all original Google GenAI SDK functionality
+- Wrapping a client multiple times will throw an error
+- All traced calls use `run_type: "llm"`
+- This is a beta feature and may change in future releases
+- Supports text generation, multimodal inputs, image generation, and function calling

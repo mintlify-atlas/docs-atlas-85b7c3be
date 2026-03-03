@@ -1,0 +1,362 @@
+---
+title: PromptCache and Cache
+description: LRU cache with background refresh for prompt caching
+---
+
+The `PromptCache` class provides an in-memory LRU cache with background refresh functionality, specifically designed for caching prompts from the LangSmith Hub.
+
+## PromptCache
+
+### Constructor
+
+```typescript
+import { PromptCache } from "langsmith";
+
+const cache = new PromptCache({
+  maxSize: 100,
+  ttlSeconds: 3600,
+  refreshIntervalSeconds: 60,
+});
+```
+
+<ParamField path="config" type="CacheConfig">
+  Configuration options for the cache
+  
+  <Accordion title="CacheConfig properties">
+    <ParamField path="maxSize" type="number" default="100">
+      Maximum entries in cache. LRU eviction when exceeded. Set to 0 to disable caching.
+    </ParamField>
+    
+    <ParamField path="ttlSeconds" type="number | null" default="3600">
+      Time in seconds before entry is stale. Set to null for infinite TTL.
+    </ParamField>
+    
+    <ParamField path="refreshIntervalSeconds" type="number" default="60">
+      How often to check for stale entries in seconds.
+    </ParamField>
+  </Accordion>
+</ParamField>
+
+### Methods
+
+#### get()
+
+Get a value from cache.
+
+```typescript
+const prompt = cache.get(
+  "my-prompt:latest",
+  async () => await client.getPrompt("my-prompt:latest")
+);
+```
+
+<ParamField path="key" type="string" required>
+  The cache key.
+</ParamField>
+
+<ParamField path="refreshFunc" type="() => Promise<PromptCommit>" required>
+  Function to refresh the value when stale.
+</ParamField>
+
+<ResponseField name="PromptCommit | undefined" type="PromptCommit | undefined">
+  The cached value or undefined if not found. Stale entries are still returned (background refresh handles updates).
+</ResponseField>
+
+#### set()
+
+Set a value in the cache.
+
+```typescript
+cache.set(
+  "my-prompt:latest",
+  promptCommit,
+  async () => await client.getPrompt("my-prompt:latest")
+);
+```
+
+<ParamField path="key" type="string" required>
+  The cache key.
+</ParamField>
+
+<ParamField path="value" type="PromptCommit" required>
+  The value to cache.
+</ParamField>
+
+<ParamField path="refreshFunc" type="() => Promise<PromptCommit>" required>
+  Function to refresh the value when stale.
+</ParamField>
+
+#### invalidate()
+
+Remove a specific entry from cache.
+
+```typescript
+cache.invalidate("my-prompt:latest");
+```
+
+#### clear()
+
+Clear all cache entries.
+
+```typescript
+cache.clear();
+```
+
+#### stop()
+
+Stop background refresh. Should be called when the cache is being cleaned up.
+
+```typescript
+cache.stop();
+```
+
+#### dump()
+
+Dump cache contents to a JSON file for offline use.
+
+```typescript
+cache.dump("/path/to/cache.json");
+```
+
+<ParamField path="filePath" type="string" required>
+  Path to save the cache file.
+</ParamField>
+
+#### load()
+
+Load cache contents from a JSON file. Loaded entries get a fresh TTL starting from load time.
+
+```typescript
+const numLoaded = cache.load("/path/to/cache.json");
+```
+
+<ParamField path="filePath" type="string" required>
+  Path to the cache file.
+</ParamField>
+
+<ResponseField name="number" type="number">
+  Number of entries loaded.
+</ResponseField>
+
+#### configure()
+
+Reconfigure the cache.
+
+```typescript
+cache.configure({
+  maxSize: 200,
+  ttlSeconds: 7200,
+});
+```
+
+### Properties
+
+<ResponseField name="size" type="number">
+  The number of entries in the cache.
+</ResponseField>
+
+<ResponseField name="metrics" type="CacheMetrics">
+  Cache performance metrics.
+  
+  ```typescript
+  interface CacheMetrics {
+    hits: number;
+    misses: number;
+    refreshes: number;
+    refreshErrors: number;
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="totalRequests" type="number">
+  Total cache requests (hits + misses).
+</ResponseField>
+
+<ResponseField name="hitRate" type="number">
+  Cache hit rate (0.0 to 1.0).
+</ResponseField>
+
+#### resetMetrics()
+
+Reset all metrics to zero.
+
+```typescript
+cache.resetMetrics();
+```
+
+## Global prompt cache
+
+The SDK provides a global singleton cache for prompts.
+
+### configureGlobalPromptCache()
+
+Configure the global prompt cache.
+
+```typescript
+import { configureGlobalPromptCache } from "langsmith";
+
+configureGlobalPromptCache({
+  maxSize: 200,
+  ttlSeconds: 7200,
+  refreshIntervalSeconds: 120,
+});
+```
+
+<ParamField path="config" type="CacheConfig" required>
+  Cache configuration options.
+</ParamField>
+
+## Client integration
+
+By default, the LangSmith client uses the global prompt cache. You can disable it per-client:
+
+```typescript
+import { Client } from "langsmith";
+
+const client = new Client({
+  disablePromptCache: true,
+});
+```
+
+## Features
+
+### LRU eviction
+
+When the cache reaches `maxSize`, the least recently used entry is evicted:
+
+```typescript
+const cache = new PromptCache({ maxSize: 3 });
+
+cache.set("key1", value1, refresh1);
+cache.set("key2", value2, refresh2);
+cache.set("key3", value3, refresh3);
+
+// This will evict key1
+cache.set("key4", value4, refresh4);
+```
+
+### Stale-while-revalidate
+
+Stale entries are still returned while being refreshed in the background:
+
+```typescript
+const cache = new PromptCache({
+  ttlSeconds: 60,
+  refreshIntervalSeconds: 10,
+});
+
+// Initial fetch
+const prompt1 = cache.get("my-prompt", fetchPrompt);
+
+// After 70 seconds, entry is stale but still returned
+const prompt2 = cache.get("my-prompt", fetchPrompt);
+
+// Background refresh happens automatically
+```
+
+### Background refresh
+
+The cache automatically refreshes stale entries in the background:
+
+```typescript
+const cache = new PromptCache({
+  ttlSeconds: 300, // 5 minutes
+  refreshIntervalSeconds: 60, // Check every minute
+});
+
+// Cache will check for stale entries every 60 seconds
+// and refresh them if TTL has expired
+```
+
+### Persistence
+
+Dump and load cache for offline use:
+
+```typescript
+const cache = new PromptCache();
+
+// Populate cache
+cache.set("prompt1", value1, refresh1);
+cache.set("prompt2", value2, refresh2);
+
+// Save to disk
+cache.dump("./prompts.cache.json");
+
+// Later, in another process
+const newCache = new PromptCache();
+const numLoaded = newCache.load("./prompts.cache.json");
+console.log(`Loaded ${numLoaded} prompts`);
+```
+
+## Example usage
+
+### Basic usage
+
+```typescript
+import { PromptCache, Client } from "langsmith";
+
+const cache = new PromptCache({
+  maxSize: 100,
+  ttlSeconds: 3600,
+});
+
+const client = new Client();
+
+const getPrompt = async (key: string) => {
+  const cached = cache.get(key, async () => {
+    return await client.getPrompt(key);
+  });
+  
+  if (cached) {
+    console.log("Cache hit!");
+    return cached;
+  }
+  
+  console.log("Cache miss, fetching...");
+  const prompt = await client.getPrompt(key);
+  cache.set(key, prompt, async () => await client.getPrompt(key));
+  return prompt;
+};
+
+const prompt = await getPrompt("my-prompt:latest");
+```
+
+### With metrics
+
+```typescript
+const cache = new PromptCache();
+
+// Use the cache
+for (let i = 0; i < 100; i++) {
+  cache.get(`prompt-${i % 10}`, fetchPrompt);
+}
+
+// Check metrics
+console.log(`Hit rate: ${(cache.hitRate * 100).toFixed(1)}%`);
+console.log(`Total requests: ${cache.totalRequests}`);
+console.log(`Metrics:`, cache.metrics);
+```
+
+### Disable caching
+
+Set `maxSize` to 0 to disable caching:
+
+```typescript
+const cache = new PromptCache({ maxSize: 0 });
+
+// This will always return undefined
+const result = cache.get("key", fetchFunc);
+```
+
+## Cache (deprecated)
+
+<Warning>
+The `Cache` class is deprecated. Use `PromptCache` instead.
+</Warning>
+
+```typescript
+import { Cache } from "langsmith";
+
+// This will log a deprecation warning
+const cache = new Cache();
+```

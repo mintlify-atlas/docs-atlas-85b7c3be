@@ -1,0 +1,491 @@
+---
+title: Anthropic integration
+description: Automatically trace Anthropic API calls with wrapAnthropic
+---
+
+The LangSmith SDK provides native wrappers for the Anthropic SDK that automatically trace all API calls including message creation and streaming.
+
+## Installation
+
+<CodeGroup>
+
+```bash Python
+pip install langsmith anthropic
+```
+
+```bash TypeScript
+npm install langsmith @anthropic-ai/sdk
+```
+
+</CodeGroup>
+
+## Basic usage
+
+Wrap your Anthropic client with `wrap_anthropic` (Python) or `wrapAnthropic` (TypeScript) to enable automatic tracing:
+
+<CodeGroup>
+
+```python Python
+import anthropic
+from langsmith import wrappers
+
+# Wrap the Anthropic client
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+# Use as normal - automatically traced
+completion = client.messages.create(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1000,
+    system="You are a helpful assistant.",
+    messages=[
+        {"role": "user", "content": "What is the capital of France?"}
+    ]
+)
+
+print(completion.content[0].text)
+```
+
+```typescript TypeScript
+import Anthropic from "@anthropic-ai/sdk";
+import { wrapAnthropic } from "langsmith/wrappers/anthropic";
+
+// Wrap the Anthropic client
+const client = wrapAnthropic(new Anthropic());
+
+// Use as normal - automatically traced
+const message = await client.messages.create({
+  model: "claude-3-5-sonnet-latest",
+  max_tokens: 1024,
+  messages: [
+    { role: "user", content: "What is the capital of France?" }
+  ]
+});
+
+console.log(message.content[0].text);
+```
+
+</CodeGroup>
+
+## System prompts
+
+System prompts are automatically converted to message format for better visibility in the LangSmith playground:
+
+<CodeGroup>
+
+```python Python
+import anthropic
+from langsmith import wrappers
+
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+# System parameter is preserved and traced
+message = client.messages.create(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1000,
+    system="You are a helpful assistant specialized in physics.",
+    messages=[
+        {"role": "user", "content": "Explain quantum entanglement"}
+    ]
+)
+
+print(message.content[0].text)
+```
+
+```typescript TypeScript
+import Anthropic from "@anthropic-ai/sdk";
+import { wrapAnthropic } from "langsmith/wrappers/anthropic";
+
+const client = wrapAnthropic(new Anthropic());
+
+// System is shown as first message in trace
+const message = await client.messages.create({
+  model: "claude-3-5-sonnet-latest",
+  max_tokens: 1024,
+  system: "You are a helpful assistant specialized in physics.",
+  messages: [
+    { role: "user", content: "Explain quantum entanglement" }
+  ]
+});
+
+console.log(message.content[0].text);
+```
+
+</CodeGroup>
+
+## Streaming with messages.stream
+
+Streaming via the `messages.stream()` context manager is fully supported:
+
+<CodeGroup>
+
+```python Python
+import anthropic
+from langsmith import wrappers
+
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+# Stream using context manager
+with client.messages.stream(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1000,
+    messages=[{"role": "user", "content": "Count to 10"}]
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+    
+    # Get final message
+    message = stream.get_final_message()
+    print(f"\nStop reason: {message.stop_reason}")
+```
+
+```typescript TypeScript
+import Anthropic from "@anthropic-ai/sdk";
+import { wrapAnthropic } from "langsmith/wrappers/anthropic";
+
+const client = wrapAnthropic(new Anthropic());
+
+// Stream using async iteration
+const stream = client.messages.stream({
+  model: "claude-3-5-sonnet-latest",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Count to 10" }]
+});
+
+for await (const text of stream.text_stream) {
+  process.stdout.write(text);
+}
+
+const message = await stream.finalMessage();
+console.log(`\nStop reason: ${message.stop_reason}`);
+```
+
+</CodeGroup>
+
+## Streaming with messages.create
+
+You can also stream with `messages.create` by setting `stream=True`:
+
+<CodeGroup>
+
+```python Python
+import anthropic
+from langsmith import wrappers
+
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+stream = client.messages.create(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1000,
+    messages=[{"role": "user", "content": "Write a haiku about coding"}],
+    stream=True
+)
+
+for event in stream:
+    if event.type == "content_block_delta":
+        if hasattr(event.delta, "text"):
+            print(event.delta.text, end="", flush=True)
+```
+
+```typescript TypeScript
+import Anthropic from "@anthropic-ai/sdk";
+import { wrapAnthropic } from "langsmith/wrappers/anthropic";
+
+const client = wrapAnthropic(new Anthropic());
+
+const stream = await client.messages.create({
+  model: "claude-3-5-sonnet-latest",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Write a haiku about coding" }],
+  stream: true
+});
+
+for await (const event of stream) {
+  if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+    process.stdout.write(event.delta.text);
+  }
+}
+```
+
+</CodeGroup>
+
+## Adding metadata and tags
+
+<Warning>
+In TypeScript, custom metadata must be passed via the `langsmithExtra` parameter.
+</Warning>
+
+<CodeGroup>
+
+```python Python
+import anthropic
+from langsmith import wrappers
+
+client = wrappers.wrap_anthropic(
+    anthropic.Anthropic(),
+    tracing_extra={
+        "metadata": {"environment": "production", "version": "1.0"},
+        "tags": ["anthropic", "claude"]
+    }
+)
+
+message = client.messages.create(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1000,
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+```typescript TypeScript
+import Anthropic from "@anthropic-ai/sdk";
+import { wrapAnthropic } from "langsmith/wrappers/anthropic";
+
+const client = wrapAnthropic(new Anthropic(), {
+  metadata: { environment: "production", version: "1.0" },
+  tags: ["anthropic", "claude"]
+});
+
+// Per-request metadata via langsmithExtra
+const message = await client.messages.create(
+  {
+    model: "claude-3-5-sonnet-latest",
+    max_tokens: 1024,
+    messages: [{ role: "user", content: "Hello!" }]
+  },
+  {
+    langsmithExtra: {
+      metadata: { user_id: "user_123" },
+      tags: ["greeting"]
+    }
+  }
+);
+```
+
+</CodeGroup>
+
+## Tool use
+
+Tool calling with Claude is automatically traced:
+
+<CodeGroup>
+
+```python Python
+import anthropic
+from langsmith import wrappers
+
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+tools = [
+    {
+        "name": "get_weather",
+        "description": "Get the current weather in a location",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "City name"}
+            },
+            "required": ["location"]
+        }
+    }
+]
+
+message = client.messages.create(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1000,
+    tools=tools,
+    messages=[{"role": "user", "content": "What's the weather in Paris?"}]
+)
+
+if message.stop_reason == "tool_use":
+    tool_use = next(block for block in message.content if block.type == "tool_use")
+    print(f"Tool: {tool_use.name}")
+    print(f"Input: {tool_use.input}")
+```
+
+```typescript TypeScript
+import Anthropic from "@anthropic-ai/sdk";
+import { wrapAnthropic } from "langsmith/wrappers/anthropic";
+
+const client = wrapAnthropic(new Anthropic());
+
+const tools: Anthropic.Tool[] = [
+  {
+    name: "get_weather",
+    description: "Get the current weather in a location",
+    input_schema: {
+      type: "object",
+      properties: {
+        location: { type: "string", description: "City name" }
+      },
+      required: ["location"]
+    }
+  }
+];
+
+const message = await client.messages.create({
+  model: "claude-3-5-sonnet-latest",
+  max_tokens: 1024,
+  tools,
+  messages: [{ role: "user", content: "What's the weather in Paris?" }]
+});
+
+if (message.stop_reason === "tool_use") {
+  const toolUse = message.content.find(block => block.type === "tool_use");
+  if (toolUse && toolUse.type === "tool_use") {
+    console.log(`Tool: ${toolUse.name}`);
+    console.log(`Input: ${JSON.stringify(toolUse.input)}`);
+  }
+}
+```
+
+</CodeGroup>
+
+## Prompt caching
+
+Anthropic's prompt caching is automatically tracked in token usage:
+
+<CodeGroup>
+
+```python Python
+import anthropic
+from langsmith import wrappers
+
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+# Use cache_control to enable prompt caching
+message = client.messages.create(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1000,
+    system=[
+        {
+            "type": "text",
+            "text": "You are a helpful assistant.",
+            "cache_control": {"type": "ephemeral"}
+        }
+    ],
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+
+# Cache read tokens appear in usage metadata
+print(message.usage)
+```
+
+```typescript TypeScript
+import Anthropic from "@anthropic-ai/sdk";
+import { wrapAnthropic } from "langsmith/wrappers/anthropic";
+
+const client = wrapAnthropic(new Anthropic());
+
+const message = await client.messages.create({
+  model: "claude-3-5-sonnet-latest",
+  max_tokens: 1024,
+  system: [
+    {
+      type: "text",
+      text: "You are a helpful assistant.",
+      cache_control: { type: "ephemeral" }
+    }
+  ],
+  messages: [{ role: "user", content: "Hello!" }]
+});
+
+// Cache read tokens appear in usage metadata
+console.log(message.usage);
+```
+
+</CodeGroup>
+
+## Accessing raw HTTP responses
+
+The `with_raw_response` API is supported:
+
+<CodeGroup>
+
+```python Python
+import anthropic
+from langsmith import wrappers
+
+client = wrappers.wrap_anthropic(anthropic.Anthropic())
+
+# Access HTTP headers
+raw_response = client.messages.with_raw_response.create(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1000,
+    messages=[{"role": "user", "content": "Hello"}]
+)
+
+print(raw_response.headers)
+message = raw_response.parse()
+print(message.content[0].text)
+```
+
+```typescript TypeScript
+import Anthropic from "@anthropic-ai/sdk";
+import { wrapAnthropic } from "langsmith/wrappers/anthropic";
+
+const client = wrapAnthropic(new Anthropic());
+
+const message = await client.messages.create({
+  model: "claude-3-5-sonnet-latest",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Hello" }]
+});
+
+console.log(message.content[0].text);
+```
+
+</CodeGroup>
+
+## Token usage tracking
+
+Token usage is automatically extracted and displayed in LangSmith, including:
+
+- Input tokens
+- Output tokens
+- Cache read tokens (prompt caching)
+- Cache creation tokens
+- Ephemeral cache tokens (5min and 1h)
+
+All token counts appear in the trace details without any additional configuration.
+
+## Async clients
+
+Both sync and async Anthropic clients are supported:
+
+<CodeGroup>
+
+```python Python
+import anthropic
+from langsmith import wrappers
+import asyncio
+
+async def main():
+    client = wrappers.wrap_anthropic(anthropic.AsyncAnthropic())
+    
+    message = await client.messages.create(
+        model="claude-3-5-sonnet-latest",
+        max_tokens=1000,
+        messages=[{"role": "user", "content": "Hello!"}]
+    )
+    
+    print(message.content[0].text)
+
+asyncio.run(main())
+```
+
+```typescript TypeScript
+import Anthropic from "@anthropic-ai/sdk";
+import { wrapAnthropic } from "langsmith/wrappers/anthropic";
+
+// Anthropic SDK is already async in TypeScript
+const client = wrapAnthropic(new Anthropic());
+
+const message = await client.messages.create({
+  model: "claude-3-5-sonnet-latest",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Hello!" }]
+});
+
+console.log(message.content[0].text);
+```
+
+</CodeGroup>

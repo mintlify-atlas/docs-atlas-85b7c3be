@@ -1,0 +1,287 @@
+---
+title: Wrappers overview
+description: Automatic LangSmith tracing for popular LLM SDKs
+---
+
+LangSmith provides wrapper functions that add automatic tracing to popular LLM SDKs. These wrappers require minimal code changes while providing comprehensive observability.
+
+## Available wrappers
+
+<CardGroup cols={3}>
+  <Card title="OpenAI" icon="code" href="/typescript/wrappers/openai">
+    Wrap OpenAI and Azure OpenAI clients
+  </Card>
+  <Card title="Anthropic" icon="code" href="/typescript/wrappers/anthropic">
+    Wrap Anthropic Claude clients (experimental)
+  </Card>
+  <Card title="Gemini" icon="code" href="/typescript/wrappers/gemini">
+    Wrap Google Gemini clients (beta)
+  </Card>
+</CardGroup>
+
+## Quick comparison
+
+| Wrapper | Status | Provider Detection | Streaming | Tool Calling | Usage Tracking |
+|---------|--------|-------------------|-----------|--------------|----------------|
+| OpenAI | Stable | ✅ (OpenAI/Azure) | ✅ | ✅ | ✅ (w/ cache) |
+| Anthropic | Experimental | ✅ | ✅ | ✅ | ✅ (w/ cache) |
+| Gemini | Beta | ✅ | ✅ | ✅ | ✅ |
+
+## When to use wrappers
+
+Wrappers are ideal when:
+- You want automatic tracing with minimal code changes
+- You're using supported LLM SDKs directly
+- You want automatic metadata extraction (model, tokens, etc.)
+- You need streaming support
+
+## When to use traceable()
+
+Use `traceable()` instead when:
+- You're building custom chains or workflows
+- You need fine-grained control over traces
+- You're not using a supported SDK
+- You want to trace non-LLM operations
+
+## Common usage pattern
+
+All wrappers follow the same pattern:
+
+```typescript
+import { SomeSDK } from "some-sdk";
+import { wrapSomeSDK } from "langsmith/wrappers/some-sdk";
+
+// 1. Create the client
+const client = new SomeSDK();
+
+// 2. Wrap it
+const wrapped = wrapSomeSDK(client, {
+  project_name: "my-project",
+  tags: ["production"],
+});
+
+// 3. Use normally - tracing happens automatically
+const response = await wrapped.someMethod();
+```
+
+## Shared features
+
+All wrappers provide:
+
+### Automatic metadata extraction
+
+- Provider name (openai, anthropic, google)
+- Model name
+- Model type (chat, llm)
+- Temperature
+- Max tokens
+- Stop sequences
+
+### Usage tracking
+
+- Input tokens
+- Output tokens
+- Total tokens
+- Cache hits (when applicable)
+- Reasoning/thinking tokens (when applicable)
+
+### Streaming support
+
+All wrappers handle streaming responses and aggregate them in the trace:
+
+```typescript
+const stream = await wrapped.createStream(...);
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk);
+}
+// Full aggregated output is logged to LangSmith
+```
+
+### Custom metadata
+
+Pass additional metadata per-call:
+
+```typescript
+const response = await wrapped.someMethod(
+  params,
+  {
+    langsmithExtra: {
+      name: "custom-name",
+      metadata: { user_id: "123" },
+      tags: ["important"],
+    },
+  }
+);
+```
+
+### Nested tracing
+
+Wrappers work seamlessly with `traceable()`:
+
+```typescript
+import { traceable } from "langsmith/traceable";
+
+const myChain = traceable(
+  async (input) => {
+    // This LLM call will be a child run
+    const response = await wrapped.generate(input);
+    return response;
+  },
+  { name: "my-chain", run_type: "chain" }
+);
+```
+
+## Configuration options
+
+All wrappers accept the same configuration:
+
+```typescript
+const wrapped = wrapSDK(client, {
+  // Project to log to
+  project_name: "my-project",
+  
+  // Tags for all runs
+  tags: ["production", "v1"],
+  
+  // Metadata for all runs
+  metadata: {
+    environment: "prod",
+  },
+  
+  // Custom LangSmith client
+  client: myClient,
+  
+  // Disable tracing conditionally
+  tracingEnabled: process.env.NODE_ENV === "production",
+});
+```
+
+## Error handling
+
+Wrappers automatically log errors to LangSmith:
+
+```typescript
+try {
+  const response = await wrapped.generate(input);
+} catch (error) {
+  // Error is automatically logged to the trace
+  console.error(error);
+}
+```
+
+## Combining wrappers
+
+You can use multiple wrappers in the same application:
+
+```typescript
+import { OpenAI } from "openai";
+import Anthropic from "@anthropic-ai/sdk";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+import { wrapAnthropic } from "langsmith/wrappers/anthropic";
+
+const openai = wrapOpenAI(new OpenAI());
+const anthropic = wrapAnthropic(new Anthropic());
+
+// Both will trace to the same project
+const gptResponse = await openai.chat.completions.create(...);
+const claudeResponse = await anthropic.messages.create(...);
+```
+
+## Performance considerations
+
+Wrappers add minimal overhead:
+- Tracing is asynchronous and non-blocking
+- Background batching reduces network calls
+- No impact on streaming performance
+
+## Migration guide
+
+### From unwrapped to wrapped
+
+```typescript
+// Before
+import { OpenAI } from "openai";
+const client = new OpenAI();
+
+// After
+import { OpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+const client = wrapOpenAI(new OpenAI());
+
+// All existing code works unchanged!
+```
+
+### From traceable to wrapper
+
+```typescript
+// Before - manual tracing
+const llmCall = traceable(
+  async (input) => {
+    return await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [{ role: "user", content: input }],
+    });
+  },
+  { name: "llm-call", run_type: "llm" }
+);
+
+// After - automatic tracing
+const wrapped = wrapOpenAI(openai);
+const response = await wrapped.chat.completions.create({
+  model: "gpt-4",
+  messages: [{ role: "user", content: input }],
+});
+```
+
+## Best practices
+
+1. **Wrap once, use everywhere**: Create wrapped clients at module level
+2. **Use per-call metadata**: Add context-specific metadata via `langsmithExtra`
+3. **Combine with traceable**: Use wrappers for LLM calls, `traceable()` for chains
+4. **Check wrapper status**: Be aware of experimental/beta features
+5. **Don't double-wrap**: Wrapping the same client twice will throw an error
+
+## Example: Full application
+
+```typescript
+import { OpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+import { traceable } from "langsmith/traceable";
+
+// Wrap the client once
+const openai = wrapOpenAI(new OpenAI(), {
+  project_name: "my-app",
+  tags: ["production"],
+});
+
+// Use in a traceable chain
+const answerQuestion = traceable(
+  async (question: string, userId: string) => {
+    // Automatically creates a child run
+    const response = await openai.chat.completions.create(
+      {
+        model: "gpt-4",
+        messages: [
+          { role: "system", content: "You are a helpful assistant." },
+          { role: "user", content: question },
+        ],
+      },
+      {
+        langsmithExtra: {
+          metadata: { user_id: userId },
+        },
+      }
+    );
+    
+    return response.choices[0].message.content;
+  },
+  { name: "answer-question", run_type: "chain" }
+);
+
+// Use the function
+const answer = await answerQuestion(
+  "What is LangSmith?",
+  "user-123"
+);
+```

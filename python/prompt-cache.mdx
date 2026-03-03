@@ -1,0 +1,310 @@
+---
+title: PromptCache
+description: Thread-safe LRU cache for prompts with background refresh
+---
+
+The `PromptCache` and `AsyncPromptCache` classes provide in-memory caching for prompts pulled from LangSmith, with automatic background refresh to keep cached data up-to-date.
+
+## PromptCache
+
+Synchronous prompt cache with LRU eviction and background refresh.
+
+```python
+from langsmith import PromptCache, Client
+
+cache = PromptCache(
+    max_size=100,
+    ttl_seconds=300,
+    refresh_interval_seconds=60
+)
+
+client = Client(cache=cache)
+
+# First call fetches from API
+prompt1 = client.pull_prompt("my-prompt")
+
+# Second call returns cached version
+prompt2 = client.pull_prompt("my-prompt")  # Instant
+
+# After TTL, background refresh updates the cache
+```
+
+### Constructor
+
+<ParamField path="max_size" type="int">
+  Maximum number of prompts to cache. When exceeded, least recently used prompts are evicted. Default is `100`.
+  
+  Set to `0` to disable caching.
+</ParamField>
+
+<ParamField path="ttl_seconds" type="float | None">
+  Time-to-live in seconds before a cached prompt is considered stale. Default is `300` (5 minutes).
+  
+  Set to `None` for infinite TTL (no expiration or background refresh).
+</ParamField>
+
+<ParamField path="refresh_interval_seconds" type="float">
+  How often to check for stale prompts and refresh them in the background. Default is `60` (1 minute).
+</ParamField>
+
+### Methods
+
+#### start
+
+Start the background refresh thread.
+
+```python
+cache = PromptCache()
+cache.start()
+
+# Use cache...
+
+cache.stop()  # Clean shutdown
+```
+
+#### stop
+
+Stop the background refresh thread.
+
+```python
+cache.stop()
+```
+
+#### clear
+
+Clear all cached entries.
+
+```python
+cache.clear()
+```
+
+#### invalidate
+
+Remove a specific prompt from cache.
+
+```python
+cache.invalidate("my-prompt:abc123")
+```
+
+<ParamField path="key" type="str" required>
+  Prompt identifier to remove from cache.
+</ParamField>
+
+#### dump
+
+Save cache contents to a JSON file for offline use.
+
+```python
+cache.dump("prompts_cache.json")
+```
+
+<ParamField path="path" type="str | Path" required>
+  Path to save the cache file.
+</ParamField>
+
+#### load
+
+Load cache contents from a JSON file.
+
+```python
+cache.load("prompts_cache.json")
+```
+
+<ParamField path="path" type="str | Path" required>
+  Path to the cache file.
+</ParamField>
+
+### Properties
+
+#### metrics
+
+Get cache performance metrics.
+
+```python
+metrics = cache.metrics
+
+print(f"Hits: {metrics.hits}")
+print(f"Misses: {metrics.misses}")
+print(f"Hit rate: {metrics.hit_rate:.2%}")
+print(f"Refreshes: {metrics.refreshes}")
+print(f"Refresh errors: {metrics.refresh_errors}")
+```
+
+<ResponseField name="hits" type="int">
+  Number of cache hits.
+</ResponseField>
+
+<ResponseField name="misses" type="int">
+  Number of cache misses.
+</ResponseField>
+
+<ResponseField name="hit_rate" type="float">
+  Hit rate as a value between 0.0 and 1.0.
+</ResponseField>
+
+<ResponseField name="refreshes" type="int">
+  Number of successful background refreshes.
+</ResponseField>
+
+<ResponseField name="refresh_errors" type="int">
+  Number of failed refresh attempts.
+</ResponseField>
+
+## AsyncPromptCache
+
+Async version of `PromptCache` for use with `AsyncClient`.
+
+```python
+from langsmith import AsyncPromptCache, AsyncClient
+
+cache = AsyncPromptCache(
+    max_size=100,
+    ttl_seconds=300
+)
+
+client = AsyncClient(cache=cache)
+
+async with client:
+    # First call fetches from API
+    prompt1 = await client.apull_prompt("my-prompt")
+    
+    # Second call returns cached version
+    prompt2 = await client.apull_prompt("my-prompt")
+```
+
+The API is identical to `PromptCache`, but methods are async:
+
+```python
+cache = AsyncPromptCache()
+
+await cache.start()
+# Use cache...
+await cache.stop()
+```
+
+## Global cache configuration
+
+Configure the global singleton cache used by default clients.
+
+### configure_global_prompt_cache
+
+Configure the global synchronous prompt cache.
+
+```python
+from langsmith import configure_global_prompt_cache
+
+configure_global_prompt_cache(
+    max_size=200,
+    ttl_seconds=600,
+    refresh_interval_seconds=120
+)
+
+# All Client instances now use this configuration
+from langsmith import Client
+client = Client()
+prompt = client.pull_prompt("my-prompt")  # Uses global cache
+```
+
+### configure_global_async_prompt_cache
+
+Configure the global async prompt cache.
+
+```python
+from langsmith import configure_global_async_prompt_cache
+
+configure_global_async_prompt_cache(
+    max_size=200,
+    ttl_seconds=600
+)
+
+# All AsyncClient instances now use this configuration
+from langsmith import AsyncClient
+client = AsyncClient()
+prompt = await client.apull_prompt("my-prompt")
+```
+
+## Disabling the cache
+
+Disable caching for a specific client:
+
+```python
+from langsmith import Client
+
+# Disable caching
+client = Client(disable_prompt_cache=True)
+
+# Every pull_prompt call fetches from API
+prompt = client.pull_prompt("my-prompt")
+```
+
+Or set cache size to 0:
+
+```python
+from langsmith import configure_global_prompt_cache
+
+configure_global_prompt_cache(max_size=0)
+```
+
+## How it works
+
+1. **LRU eviction**: When `max_size` is reached, least recently used prompts are removed
+2. **TTL-based staleness**: Cached prompts older than `ttl_seconds` are marked stale
+3. **Background refresh**: A background thread periodically checks for stale prompts and refreshes them
+4. **Stale data served**: While refreshing, stale data is still returned (no blocking)
+5. **Thread-safe**: All operations are thread-safe with proper locking
+
+## Best practices
+
+1. **Use global configuration**: Set once at startup
+   ```python
+   from langsmith import configure_global_prompt_cache
+   
+   configure_global_prompt_cache(
+       max_size=100,
+       ttl_seconds=300
+   )
+   ```
+
+2. **Adjust TTL based on update frequency**: Short TTL for frequently updated prompts
+   ```python
+   # Prompts updated hourly
+   configure_global_prompt_cache(ttl_seconds=300)  # 5 min
+   
+   # Prompts rarely updated
+   configure_global_prompt_cache(ttl_seconds=3600)  # 1 hour
+   ```
+
+3. **Monitor metrics**: Check hit rates to optimize cache size
+   ```python
+   from langsmith import Client
+   
+   client = Client()
+   # ... use client ...
+   
+   if hasattr(client, '_cache') and client._cache:
+       print(f"Hit rate: {client._cache.metrics.hit_rate:.2%}")
+   ```
+
+4. **Persist cache for faster startup**: Save/load cache across restarts
+   ```python
+   from langsmith import PromptCache
+   
+   cache = PromptCache()
+   
+   # On startup
+   try:
+       cache.load("prompts_cache.json")
+   except FileNotFoundError:
+       pass
+   
+   # On shutdown
+   cache.dump("prompts_cache.json")
+   ```
+
+5. **Disable in development**: For testing prompt changes
+   ```python
+   import os
+   
+   disable = os.getenv("ENV") == "development"
+   client = Client(disable_prompt_cache=disable)
+   ```

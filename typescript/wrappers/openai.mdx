@@ -1,0 +1,314 @@
+---
+title: wrapOpenAI()
+description: Automatic LangSmith tracing for OpenAI SDK
+---
+
+The `wrapOpenAI()` function wraps an OpenAI client to enable automatic LangSmith tracing for all completions.
+
+## Installation
+
+```bash
+npm install langsmith openai
+```
+
+## Basic usage
+
+```typescript
+import { OpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+
+const client = wrapOpenAI(new OpenAI());
+
+const response = await client.chat.completions.create({
+  model: "gpt-4",
+  messages: [{ role: "user", content: "Hello!" }],
+});
+```
+
+## Signature
+
+```typescript
+function wrapOpenAI<T extends OpenAIType>(
+  openai: T,
+  options?: Partial<RunTreeConfig>
+): PatchedOpenAIClient<T>
+```
+
+<ParamField path="openai" type="OpenAI" required>
+  An OpenAI client instance to wrap.
+</ParamField>
+
+<ParamField path="options" type="Partial<RunTreeConfig>">
+  LangSmith tracing options
+  
+  <Accordion title="RunTreeConfig properties">
+    <ParamField path="name" type="string">
+      Override the default run name.
+    </ParamField>
+    
+    <ParamField path="project_name" type="string">
+      The LangSmith project name.
+    </ParamField>
+    
+    <ParamField path="tags" type="string[]">
+      Tags for the runs.
+    </ParamField>
+    
+    <ParamField path="metadata" type="Record<string, any>">
+      Metadata to attach to runs. Can include `ls_invocation_params` for pre-populated invocation parameters.
+    </ParamField>
+    
+    <ParamField path="client" type="Client">
+      Custom LangSmith client instance.
+    </ParamField>
+    
+    <ParamField path="tracingEnabled" type="boolean">
+      Whether to enable tracing.
+    </ParamField>
+  </Accordion>
+</ParamField>
+
+<ResponseField name="PatchedOpenAIClient<T>" type="OpenAI">
+  The wrapped OpenAI client with automatic tracing.
+</ResponseField>
+
+## Supported methods
+
+The wrapper automatically traces:
+
+- `chat.completions.create()` - Chat completions (streaming and non-streaming)
+- `chat.completions.parse()` - Structured output parsing
+- `chat.completions.stream()` - Chat completion streams
+- `completions.create()` - Legacy text completions
+- `beta.chat.completions.parse()` - Beta structured outputs
+- `beta.chat.completions.stream()` - Beta chat streams
+- `responses.create()` - Responses API (if available)
+- `responses.parse()` - Responses API parsing
+- `responses.stream()` - Responses API streaming
+
+## Features
+
+### Automatic metadata extraction
+
+The wrapper automatically extracts:
+- Provider ("openai" or "azure")
+- Model name
+- Temperature
+- Max tokens
+- Stop sequences
+- Usage metadata (input/output tokens, cache hits, reasoning tokens)
+- Service tier information
+
+### Streaming support
+
+Streaming responses are fully supported:
+
+```typescript
+const stream = await client.chat.completions.create({
+  model: "gpt-4",
+  messages: [{ role: "user", content: "Count to 5" }],
+  stream: true,
+});
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta?.content || "");
+}
+```
+
+### Usage metadata
+
+Token usage is automatically tracked:
+
+```typescript
+const response = await client.chat.completions.create({
+  model: "gpt-4",
+  messages: [{ role: "user", content: "Hello!" }],
+});
+
+// Usage metadata is automatically logged to LangSmith
+// Including:
+// - input_tokens
+// - output_tokens
+// - total_tokens
+// - cache_read tokens (if applicable)
+// - reasoning tokens (for o1 models)
+```
+
+### Azure OpenAI support
+
+The wrapper automatically detects Azure OpenAI clients:
+
+```typescript
+import { AzureOpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+
+const client = wrapOpenAI(new AzureOpenAI({
+  apiKey: process.env.AZURE_OPENAI_API_KEY,
+  endpoint: process.env.AZURE_OPENAI_ENDPOINT,
+  apiVersion: "2024-02-15-preview",
+}));
+```
+
+## Custom metadata
+
+Pass additional metadata via the `langsmithExtra` parameter:
+
+```typescript
+const response = await client.chat.completions.create(
+  {
+    model: "gpt-4",
+    messages: [{ role: "user", content: "Hello!" }],
+  },
+  {
+    langsmithExtra: {
+      name: "custom-chat",
+      metadata: { user_id: "123" },
+      tags: ["production"],
+    },
+  }
+);
+```
+
+<ParamField path="langsmithExtra" type="ExtraRunTreeConfig">
+  Additional LangSmith configuration for this specific call
+  
+  <Accordion title="ExtraRunTreeConfig properties">
+    <ParamField path="name" type="string">
+      Override the run name for this call.
+    </ParamField>
+    
+    <ParamField path="metadata" type="Record<string, any>">
+      Additional metadata for this call.
+    </ParamField>
+    
+    <ParamField path="tags" type="string[]">
+      Additional tags for this call.
+    </ParamField>
+  </Accordion>
+</ParamField>
+
+## Pre-populated invocation parameters
+
+Set default invocation parameters at the client level:
+
+```typescript
+const client = wrapOpenAI(new OpenAI(), {
+  metadata: {
+    ls_invocation_params: {
+      api_version: "2024-02-15",
+      deployment_name: "my-deployment",
+    },
+  },
+});
+
+// These parameters will be included in all traces
+```
+
+## Complete example
+
+```typescript
+import { OpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+
+const client = wrapOpenAI(new OpenAI(), {
+  project_name: "my-openai-project",
+  tags: ["production"],
+  metadata: {
+    environment: "prod",
+  },
+});
+
+// Non-streaming
+const response = await client.chat.completions.create(
+  {
+    model: "gpt-4",
+    messages: [
+      { role: "system", content: "You are a helpful assistant." },
+      { role: "user", content: "What is LangSmith?" },
+    ],
+    temperature: 0.7,
+    max_tokens: 1000,
+  },
+  {
+    langsmithExtra: {
+      metadata: { user_id: "user-123" },
+    },
+  }
+);
+
+console.log(response.choices[0].message.content);
+
+// Streaming
+const stream = await client.chat.completions.create({
+  model: "gpt-4",
+  messages: [{ role: "user", content: "Count to 10" }],
+  stream: true,
+});
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta?.content || "");
+}
+
+// Structured outputs
+const completion = await client.beta.chat.completions.parse({
+  model: "gpt-4",
+  messages: [{ role: "user", content: "Extract: John is 30 years old" }],
+  response_format: {
+    type: "json_schema",
+    json_schema: {
+      name: "person",
+      schema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          age: { type: "number" },
+        },
+      },
+    },
+  },
+});
+```
+
+## Error handling
+
+```typescript
+try {
+  const response = await client.chat.completions.create({
+    model: "gpt-4",
+    messages: [{ role: "user", content: "Hello!" }],
+  });
+} catch (error) {
+  // Errors are automatically logged to LangSmith
+  console.error(error);
+}
+```
+
+## Nested tracing
+
+The wrapper works seamlessly with `traceable()`:
+
+```typescript
+import { traceable } from "langsmith/traceable";
+
+const myChain = traceable(
+  async (input: string) => {
+    const response = await client.chat.completions.create({
+      model: "gpt-4",
+      messages: [{ role: "user", content: input }],
+    });
+    
+    return response.choices[0].message.content;
+  },
+  { name: "my-chain", run_type: "chain" }
+);
+
+await myChain("Hello!");
+// Creates a trace with the chain as parent and LLM call as child
+```
+
+## Notes
+
+- The wrapper preserves all original OpenAI SDK functionality
+- Method signatures remain unchanged except for the optional `langsmithExtra` parameter
+- Wrapping a client multiple times will throw an error
+- All traced calls use `run_type: "llm"`

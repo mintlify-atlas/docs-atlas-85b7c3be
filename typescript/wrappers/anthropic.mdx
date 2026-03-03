@@ -1,0 +1,256 @@
+---
+title: wrapAnthropic()
+description: Automatic LangSmith tracing for Anthropic SDK (experimental)
+---
+
+<Warning>
+This feature is experimental and may change in future releases.
+</Warning>
+
+The `wrapAnthropic()` function wraps an Anthropic client to enable automatic LangSmith tracing for all message completions.
+
+## Installation
+
+```bash
+npm install langsmith @anthropic-ai/sdk
+```
+
+## Basic usage
+
+```typescript
+import Anthropic from "@anthropic-ai/sdk";
+import { wrapAnthropic } from "langsmith/wrappers/anthropic";
+
+const client = wrapAnthropic(new Anthropic());
+
+const message = await client.messages.create({
+  model: "claude-sonnet-4-20250514",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Hello!" }],
+});
+```
+
+## Signature
+
+```typescript
+function wrapAnthropic<T extends AnthropicType>(
+  anthropic: T,
+  options?: Partial<RunTreeConfig>
+): PatchedAnthropicClient<T>
+```
+
+<ParamField path="anthropic" type="Anthropic" required>
+  An Anthropic client instance to wrap.
+</ParamField>
+
+<ParamField path="options" type="Partial<RunTreeConfig>">
+  LangSmith tracing options (same as wrapOpenAI).
+</ParamField>
+
+<ResponseField name="PatchedAnthropicClient<T>" type="Anthropic">
+  The wrapped Anthropic client with automatic tracing.
+</ResponseField>
+
+## Supported methods
+
+The wrapper automatically traces:
+
+- `messages.create()` - Message creation (streaming and non-streaming)
+- `messages.stream()` - Message streams with helper methods
+- `beta.messages.create()` - Beta message creation
+- `beta.messages.stream()` - Beta message streams
+
+## Features
+
+### Automatic metadata extraction
+
+The wrapper automatically extracts:
+- Provider ("anthropic")
+- Model name
+- Temperature
+- Max tokens
+- Stop sequences
+- Usage metadata (input/output tokens, cache read/write)
+
+### System message transformation
+
+System messages are transformed into the first message for better playground editing:
+
+```typescript
+const message = await client.messages.create({
+  model: "claude-sonnet-4-20250514",
+  max_tokens: 1024,
+  system: "You are a helpful assistant",
+  messages: [{ role: "user", content: "Hello!" }],
+});
+
+// In LangSmith, this appears as:
+// messages: [
+//   { role: "system", content: "You are a helpful assistant" },
+//   { role: "user", content: "Hello!" }
+// ]
+```
+
+### Streaming support
+
+```typescript
+const stream = client.messages.stream({
+  model: "claude-sonnet-4-20250514",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Count to 5" }],
+});
+
+for await (const event of stream) {
+  if (event.type === "content_block_delta") {
+    process.stdout.write(event.delta.text || "");
+  }
+}
+
+const finalMessage = await stream.finalMessage();
+```
+
+### Usage metadata
+
+Token usage including prompt caching is automatically tracked:
+
+```typescript
+const message = await client.messages.create({
+  model: "claude-sonnet-4-20250514",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Hello!" }],
+});
+
+// Usage metadata automatically includes:
+// - input_tokens
+// - output_tokens
+// - total_tokens
+// - cache_creation_input_tokens
+// - cache_read_input_tokens
+```
+
+## Custom metadata
+
+Pass additional metadata via the `langsmithExtra` parameter:
+
+```typescript
+const message = await client.messages.create(
+  {
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 1024,
+    messages: [{ role: "user", content: "Hello!" }],
+  },
+  {
+    langsmithExtra: {
+      name: "custom-chat",
+      metadata: { user_id: "123" },
+      tags: ["production"],
+    },
+  }
+);
+```
+
+## Complete example
+
+```typescript
+import Anthropic from "@anthropic-ai/sdk";
+import { wrapAnthropic } from "langsmith/wrappers/anthropic";
+
+const client = wrapAnthropic(new Anthropic(), {
+  project_name: "my-anthropic-project",
+  tags: ["production"],
+});
+
+// Non-streaming
+const message = await client.messages.create(
+  {
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 1024,
+    system: "You are a helpful assistant.",
+    messages: [
+      { role: "user", content: "What is LangSmith?" },
+    ],
+    temperature: 0.7,
+  },
+  {
+    langsmithExtra: {
+      metadata: { user_id: "user-123" },
+    },
+  }
+);
+
+console.log(message.content[0].text);
+
+// Streaming
+const stream = client.messages.stream({
+  model: "claude-sonnet-4-20250514",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Count to 10" }],
+});
+
+for await (const event of stream) {
+  if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+    process.stdout.write(event.delta.text);
+  }
+}
+
+const finalMessage = await stream.finalMessage();
+```
+
+## Tool calling
+
+```typescript
+const message = await client.messages.create({
+  model: "claude-sonnet-4-20250514",
+  max_tokens: 1024,
+  tools: [
+    {
+      name: "get_weather",
+      description: "Get the weather for a location",
+      input_schema: {
+        type: "object",
+        properties: {
+          location: { type: "string" },
+        },
+        required: ["location"],
+      },
+    },
+  ],
+  messages: [
+    { role: "user", content: "What's the weather in Paris?" },
+  ],
+});
+
+if (message.stop_reason === "tool_use") {
+  const toolUse = message.content.find(c => c.type === "tool_use");
+  console.log(toolUse);
+}
+```
+
+## Nested tracing
+
+```typescript
+import { traceable } from "langsmith/traceable";
+
+const myChain = traceable(
+  async (input: string) => {
+    const message = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: input }],
+    });
+    
+    return message.content[0].text;
+  },
+  { name: "my-chain", run_type: "chain" }
+);
+
+await myChain("Hello!");
+```
+
+## Notes
+
+- The wrapper preserves all original Anthropic SDK functionality
+- Method signatures remain unchanged except for the optional `langsmithExtra` parameter
+- Wrapping a client multiple times will throw an error
+- All traced calls use `run_type: "llm"`
+- System messages are transformed for better playground compatibility

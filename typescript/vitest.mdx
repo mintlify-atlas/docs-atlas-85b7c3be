@@ -1,0 +1,245 @@
+---
+title: Vitest integration
+description: LangSmith integration for Vitest testing framework
+---
+
+The LangSmith Vitest integration allows you to run LLM evaluations as part of your Vitest test suite, automatically creating datasets and experiments in LangSmith.
+
+## Installation
+
+```bash
+npm install --save-dev langsmith vitest
+```
+
+## Setup
+
+Import the LangSmith Vitest wrapper in your test files:
+
+```typescript
+import * as ls from "langsmith/vitest";
+```
+
+## Basic usage
+
+```typescript
+import * as ls from "langsmith/vitest";
+
+ls.describe("My LLM application", () => {
+  ls.test(
+    "Should respond correctly",
+    {
+      inputs: { query: "What is LangSmith?" },
+      referenceOutputs: { answer: "LangSmith is an observability platform" },
+    },
+    async ({ inputs, referenceOutputs }) => {
+      const response = await myApp(inputs.query);
+      
+      ls.expect(response.answer).toContain("observability");
+      
+      return { answer: response.answer };
+    }
+  );
+});
+```
+
+## API
+
+The Vitest integration has the same API as the Jest integration. See the [Jest integration](/typescript/jest) documentation for full details.
+
+### ls.describe()
+
+Defines a LangSmith test suite.
+
+```typescript
+ls.describe(name: string, fn: () => void, config?: Partial<RunTreeConfig>)
+```
+
+### ls.test()
+
+Defines a LangSmith test case.
+
+```typescript
+ls.test(
+  name: string,
+  lsParams: LangSmithJestlikeWrapperParams<I, O>,
+  fn: ({ inputs, referenceOutputs }) => any,
+  timeout?: number
+)
+```
+
+### ls.test.each()
+
+Iterate over multiple examples:
+
+```typescript
+ls.test.each([
+  {
+    inputs: { query: "Question 1" },
+    referenceOutputs: { answer: "Answer 1" },
+  },
+  {
+    inputs: { query: "Question 2" },
+    referenceOutputs: { answer: "Answer 2" },
+  },
+])(
+  "Should handle various inputs",
+  async ({ inputs, referenceOutputs }) => {
+    const response = await myApp(inputs.query);
+    return response;
+  }
+);
+```
+
+### ls.expect()
+
+Wrapped `expect` with additional matchers.
+
+```typescript
+ls.expect(actual).evaluatedBy(evaluator).toBeGreaterThan(0.5);
+```
+
+### ls.logFeedback()
+
+Log feedback for the current test.
+
+```typescript
+ls.logFeedback({
+  key: "quality",
+  score: 0.8,
+});
+```
+
+### ls.logOutputs()
+
+Log output for the current test.
+
+```typescript
+ls.logOutputs({ answer: "42" });
+```
+
+### ls.wrapEvaluator()
+
+Wrap an evaluator function.
+
+```typescript
+const wrappedEvaluator = ls.wrapEvaluator(myEvaluator);
+```
+
+## Complete example
+
+```typescript
+import * as ls from "langsmith/vitest";
+import { myLLMApp } from "./app";
+
+ls.describe("LLM Application Tests", () => {
+  ls.test(
+    "Should answer general knowledge questions",
+    {
+      inputs: { query: "What is the capital of France?" },
+      referenceOutputs: { answer: "Paris" },
+    },
+    async ({ inputs, referenceOutputs }) => {
+      const response = await myLLMApp(inputs.query);
+      
+      ls.expect(response.answer).toBeDefined();
+      
+      ls.logFeedback({
+        key: "answer_length",
+        score: response.answer.length,
+      });
+      
+      return { answer: response.answer };
+    }
+  );
+  
+  ls.test(
+    "Should use evaluator matcher",
+    {
+      inputs: { query: "Tell me about AI" },
+      referenceOutputs: { answer: "AI is artificial intelligence" },
+    },
+    async ({ inputs, referenceOutputs }) => {
+      const response = await myLLMApp(inputs.query);
+      
+      const relevanceEvaluator = async ({ outputs, referenceOutputs }) => {
+        // Your relevance logic
+        return {
+          key: "relevance",
+          score: 0.8,
+        };
+      };
+      
+      await ls.expect(response)
+        .evaluatedBy(relevanceEvaluator)
+        .toBeGreaterThan(0.7);
+      
+      return response;
+    }
+  );
+  
+  ls.test.each([
+    {
+      inputs: { query: "What is 2+2?" },
+      referenceOutputs: { answer: "4" },
+    },
+    {
+      inputs: { query: "What is 3+3?" },
+      referenceOutputs: { answer: "6" },
+    },
+  ])(
+    "Should handle math questions",
+    async ({ inputs, referenceOutputs }) => {
+      const response = await myLLMApp(inputs.query);
+      
+      await ls.expect(response.answer)
+        .toBeRelativeCloseTo(referenceOutputs.answer, { threshold: 0.9 });
+      
+      return response;
+    }
+  );
+});
+```
+
+## Configuration
+
+### Disable LangSmith tracking
+
+For purely local testing without creating experiments:
+
+```bash
+LANGSMITH_TEST_TRACKING=false npm test
+```
+
+### Custom Vitest configuration
+
+If you need to wrap a custom Vitest instance:
+
+```typescript
+import { wrapVitest } from "langsmith/vitest";
+import { expect, test, describe } from "vitest";
+
+const ls = wrapVitest({
+  expect,
+  test,
+  describe,
+  // ... other vitest methods
+});
+
+ls.describe("My tests", () => {
+  ls.test("test case", { inputs: {}, referenceOutputs: {} }, async () => {
+    // ...
+  });
+});
+```
+
+## Differences from Jest
+
+The Vitest integration is functionally identical to the Jest integration. The only difference is the import path:
+
+```typescript
+// Jest
+import * as ls from "langsmith/jest";
+
+// Vitest
+import * as ls from "langsmith/vitest";
+```

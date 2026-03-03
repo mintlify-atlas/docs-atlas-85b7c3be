@@ -1,0 +1,311 @@
+---
+title: RunTree
+description: Low-level interface for manual trace construction
+---
+
+The `RunTree` class provides fine-grained control over trace creation and management. While `@traceable` is recommended for most use cases, `RunTree` is useful when you need manual control over trace lifecycle.
+
+## Constructor
+
+```python
+from langsmith import RunTree
+
+run = RunTree(
+    name="my-operation",
+    run_type="chain",
+    inputs={"query": "What is LangSmith?"},
+    project_name="my-project"
+)
+```
+
+<ParamField path="name" type="str" required>
+  Name of the run.
+</ParamField>
+
+<ParamField path="run_type" type="str" required>
+  Type of run: `"llm"`, `"chain"`, `"tool"`, `"retriever"`, or `"prompt"`.
+</ParamField>
+
+<ParamField path="inputs" type="dict[str, Any]">
+  Input data for the run.
+</ParamField>
+
+<ParamField path="project_name" type="str | None">
+  LangSmith project to log to. Defaults to environment variable.
+</ParamField>
+
+<ParamField path="id" type="UUID | str | None">
+  Custom run ID. Auto-generated if not provided.
+</ParamField>
+
+<ParamField path="parent_run" type="RunTree | None">
+  Parent RunTree for creating nested traces.
+</ParamField>
+
+<ParamField path="tags" type="list[str] | None">
+  Tags for filtering and organization.
+</ParamField>
+
+<ParamField path="metadata" type="dict[str, Any] | None">
+  Additional metadata.
+</ParamField>
+
+<ParamField path="client" type="Client | None">
+  LangSmith client to use. Uses default client if not provided.
+</ParamField>
+
+## Core methods
+
+### post
+
+Send the run to LangSmith (creates or updates).
+
+```python
+run = RunTree(
+    name="my-chain",
+    run_type="chain",
+    inputs={"query": "hello"}
+)
+run.post()  # Sends to LangSmith
+```
+
+<ResponseField name="return" type="None">
+  Queues the run for background upload.
+</ResponseField>
+
+### end
+
+Mark the run as completed and set outputs.
+
+```python
+run.end(
+    outputs={"result": "processed data"},
+    error=None
+)
+run.post()  # Send the completed run
+```
+
+<ParamField path="outputs" type="dict[str, Any] | None">
+  Output data from the run.
+</ParamField>
+
+<ParamField path="error" type="str | None">
+  Error message if the run failed.
+</ParamField>
+
+<ParamField path="end_time" type="datetime | None">
+  Explicit end time. Defaults to current time.
+</ParamField>
+
+### patch
+
+Update specific fields of the run.
+
+```python
+run.patch(
+    outputs={"result": "updated"},
+    metadata={"score": 0.95}
+)
+```
+
+### create_child
+
+Create a child run for nested tracing.
+
+```python
+parent = RunTree(
+    name="parent",
+    run_type="chain",
+    inputs={"query": "hello"}
+)
+
+child = parent.create_child(
+    name="child",
+    run_type="tool",
+    inputs={"tool_input": "data"}
+)
+
+child.end(outputs={"tool_output": "result"})
+child.post()
+
+parent.end(outputs={"final": "done"})
+parent.post()
+```
+
+<ParamField path="name" type="str" required>
+  Name of the child run.
+</ParamField>
+
+<ParamField path="run_type" type="str" required>
+  Type of the child run.
+</ParamField>
+
+<ParamField path="inputs" type="dict[str, Any]">
+  Inputs for the child run.
+</ParamField>
+
+<ResponseField name="return" type="RunTree">
+  The newly created child RunTree.
+</ResponseField>
+
+## Context manager usage
+
+Use RunTree as a context manager for automatic timing and error handling:
+
+```python
+from langsmith import RunTree
+
+with RunTree(
+    name="my-operation",
+    run_type="chain",
+    inputs={"query": "hello"}
+) as run:
+    # Your code here
+    result = process_data()
+    run.outputs = {"result": result}
+# Automatically posted when exiting context
+```
+
+Errors are automatically captured:
+
+```python
+with RunTree(
+    name="failing-operation",
+    run_type="chain",
+    inputs={"query": "hello"}
+) as run:
+    raise ValueError("Something went wrong")
+# Error is captured in the trace
+```
+
+## Manual trace example
+
+Complete example of manually building a trace:
+
+```python
+from langsmith import RunTree
+import time
+
+# Create parent run
+parent = RunTree(
+    name="document-processing",
+    run_type="chain",
+    inputs={"doc_id": "123"},
+    project_name="my-project"
+)
+parent.post()
+
+# Create child runs
+retrieval = parent.create_child(
+    name="retrieve-document",
+    run_type="retriever",
+    inputs={"doc_id": "123"}
+)
+retrieval.post()
+
+time.sleep(0.1)  # Simulate work
+
+retrieval.end(outputs={"document": "content"})
+retrieval.post()
+
+# Another child
+processing = parent.create_child(
+    name="process-document",
+    run_type="tool",
+    inputs={"document": "content"}
+)
+processing.post()
+
+time.sleep(0.1)
+
+processing.end(outputs={"processed": "data"})
+processing.post()
+
+# Complete parent
+parent.end(outputs={"status": "complete"})
+parent.post()
+```
+
+## Properties
+
+<ResponseField name="id" type="UUID">
+  Unique identifier for the run.
+</ResponseField>
+
+<ResponseField name="trace_id" type="UUID">
+  ID of the root trace (top-level run).
+</ResponseField>
+
+<ResponseField name="dotted_order" type="str">
+  Hierarchical position in the trace tree (e.g., `"20240101T120000.1.2"`).
+</ResponseField>
+
+<ResponseField name="parent_run_id" type="UUID | None">
+  ID of the parent run, if any.
+</ResponseField>
+
+<ResponseField name="start_time" type="datetime">
+  When the run started.
+</ResponseField>
+
+<ResponseField name="end_time" type="datetime | None">
+  When the run ended.
+</ResponseField>
+
+<ResponseField name="metadata" type="dict[str, Any]">
+  Metadata attached to the run. Can be modified directly.
+</ResponseField>
+
+<ResponseField name="tags" type="list[str]">
+  Tags attached to the run. Can be modified directly.
+</ResponseField>
+
+<ResponseField name="inputs" type="dict[str, Any]">
+  Input data for the run.
+</ResponseField>
+
+<ResponseField name="outputs" type="dict[str, Any] | None">
+  Output data from the run.
+</ResponseField>
+
+<ResponseField name="error" type="str | None">
+  Error message if the run failed.
+</ResponseField>
+
+## Global configuration with configure()
+
+Set global defaults for all RunTree instances:
+
+```python
+from langsmith import configure, Client
+
+# Configure global settings
+configure(
+    client=Client(api_key="..."),
+    enabled=True,
+    project_name="my-default-project",
+    tags=["production"],
+    metadata={"version": "1.0"}
+)
+
+# These settings apply to all new RunTrees
+run = RunTree(
+    name="my-run",
+    run_type="chain",
+    inputs={}
+)
+# Inherits global project_name, tags, and metadata
+```
+
+See the [configure()](/python/tracing-context#configure) documentation for details.
+
+## When to use RunTree
+
+Use `RunTree` instead of `@traceable` when:
+
+1. **You need manual control over timing**: Start and end runs at specific points
+2. **Building traces programmatically**: Constructing complex trace structures
+3. **Integrating with existing code**: Can't easily decorate functions
+4. **Custom nested structures**: Need precise control over parent-child relationships
+
+For most cases, prefer `@traceable` for its simplicity and automatic handling.

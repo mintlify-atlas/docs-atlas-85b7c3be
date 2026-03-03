@@ -1,0 +1,409 @@
+---
+title: OpenAI integration
+description: Automatically trace OpenAI API calls with wrapOpenAI
+---
+
+The LangSmith SDK provides native wrappers for the OpenAI SDK that automatically trace all API calls including chat completions, embeddings, and the new Responses API.
+
+## Installation
+
+<CodeGroup>
+
+```bash Python
+pip install langsmith openai
+```
+
+```bash TypeScript
+npm install langsmith openai
+```
+
+</CodeGroup>
+
+## Basic usage
+
+Wrap your OpenAI client with `wrap_openai` (Python) or `wrapOpenAI` (TypeScript) to enable automatic tracing:
+
+<CodeGroup>
+
+```python Python
+import openai
+from langsmith import wrappers
+
+# Wrap the OpenAI client
+client = wrappers.wrap_openai(openai.OpenAI())
+
+# Use as normal - automatically traced
+completion = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "What is the capital of France?"}
+    ]
+)
+
+print(completion.choices[0].message.content)
+```
+
+```typescript TypeScript
+import { OpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+
+// Wrap the OpenAI client
+const client = wrapOpenAI(new OpenAI());
+
+// Use as normal - automatically traced
+const completion = await client.chat.completions.create({
+  model: "gpt-4o-mini",
+  messages: [
+    { role: "system", content: "You are a helpful assistant." },
+    { role: "user", content: "What is the capital of France?" }
+  ]
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+## Streaming responses
+
+Streaming is fully supported and automatically traced:
+
+<CodeGroup>
+
+```python Python
+import openai
+from langsmith import wrappers
+
+client = wrappers.wrap_openai(openai.OpenAI())
+
+stream = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Count to 10"}],
+    stream=True
+)
+
+for chunk in stream:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+```
+
+```typescript TypeScript
+import { OpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+
+const client = wrapOpenAI(new OpenAI());
+
+const stream = await client.chat.completions.create({
+  model: "gpt-4o-mini",
+  messages: [{ role: "user", content: "Count to 10" }],
+  stream: true
+});
+
+for await (const chunk of stream) {
+  if (chunk.choices[0]?.delta?.content) {
+    process.stdout.write(chunk.choices[0].delta.content);
+  }
+}
+```
+
+</CodeGroup>
+
+## Adding metadata and tags
+
+<Warning>
+In TypeScript, custom metadata must be passed via the `langsmithExtra` parameter.
+</Warning>
+
+<CodeGroup>
+
+```python Python
+import openai
+from langsmith import wrappers
+
+client = wrappers.wrap_openai(
+    openai.OpenAI(),
+    tracing_extra={
+        "metadata": {"environment": "production", "version": "1.0"},
+        "tags": ["openai", "gpt-4"]
+    }
+)
+
+completion = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+```typescript TypeScript
+import { OpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+
+const client = wrapOpenAI(new OpenAI(), {
+  metadata: { environment: "production", version: "1.0" },
+  tags: ["openai", "gpt-4"]
+});
+
+// Per-request metadata via langsmithExtra
+const completion = await client.chat.completions.create(
+  {
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: "Hello!" }]
+  },
+  {
+    langsmithExtra: {
+      metadata: { user_id: "user_123" },
+      tags: ["greeting"]
+    }
+  }
+);
+```
+
+</CodeGroup>
+
+## Azure OpenAI
+
+The wrapper automatically detects and supports Azure OpenAI:
+
+<CodeGroup>
+
+```python Python
+import openai
+from langsmith import wrappers
+
+# Azure OpenAI client
+client = wrappers.wrap_openai(
+    openai.AzureOpenAI(
+        api_key="your-api-key",
+        azure_endpoint="https://your-resource.openai.azure.com",
+        api_version="2024-02-15-preview"
+    )
+)
+
+# Use normally - traced as AzureChatOpenAI
+completion = client.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "Hello"}]
+)
+```
+
+```typescript TypeScript
+import { AzureOpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+
+// Azure OpenAI client
+const client = wrapOpenAI(
+  new AzureOpenAI({
+    apiKey: "your-api-key",
+    endpoint: "https://your-resource.openai.azure.com",
+    apiVersion: "2024-02-15-preview"
+  })
+);
+
+// Use normally - traced as AzureChatOpenAI
+const completion = await client.chat.completions.create({
+  model: "gpt-4",
+  messages: [{ role: "user", content: "Hello" }]
+});
+```
+
+</CodeGroup>
+
+## Responses API
+
+The new OpenAI Responses API is fully supported:
+
+<CodeGroup>
+
+```python Python
+import openai
+from langsmith import wrappers
+
+client = wrappers.wrap_openai(openai.OpenAI())
+
+# Use the Responses API
+response = client.responses.create(
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Hello!"}
+    ]
+)
+
+print(response.output_text)
+```
+
+```typescript TypeScript
+import { OpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+
+const client = wrapOpenAI(new OpenAI());
+
+// Use the Responses API (if available)
+if (client.responses) {
+  const response = await client.responses.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: "You are a helpful assistant." },
+      { role: "user", content: "Hello!" }
+    ]
+  });
+  console.log(response.output_text);
+}
+```
+
+</CodeGroup>
+
+## Structured outputs with parse
+
+The `parse` method for structured outputs is supported:
+
+<CodeGroup>
+
+```python Python
+import openai
+from langsmith import wrappers
+from pydantic import BaseModel
+
+class CalendarEvent(BaseModel):
+    name: str
+    date: str
+    participants: list[str]
+
+client = wrappers.wrap_openai(openai.OpenAI())
+
+completion = client.beta.chat.completions.parse(
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": "Extract event information."},
+        {"role": "user", "content": "Team meeting on Friday with Alice and Bob"}
+    ],
+    response_format=CalendarEvent
+)
+
+event = completion.choices[0].message.parsed
+print(event)
+```
+
+```typescript TypeScript
+import { OpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+import { z } from "zod";
+import { zodResponseFormat } from "openai/helpers/zod";
+
+const CalendarEvent = z.object({
+  name: z.string(),
+  date: z.string(),
+  participants: z.array(z.string())
+});
+
+const client = wrapOpenAI(new OpenAI());
+
+const completion = await client.beta.chat.completions.parse({
+  model: "gpt-4o-mini",
+  messages: [
+    { role: "system", content: "Extract event information." },
+    { role: "user", content: "Team meeting on Friday with Alice and Bob" }
+  ],
+  response_format: zodResponseFormat(CalendarEvent, "event")
+});
+
+const event = completion.choices[0].message.parsed;
+console.log(event);
+```
+
+</CodeGroup>
+
+## Accessing raw HTTP responses
+
+The `with_raw_response` API is supported:
+
+<CodeGroup>
+
+```python Python
+import openai
+from langsmith import wrappers
+
+client = wrappers.wrap_openai(openai.OpenAI())
+
+# Access HTTP headers
+raw_response = client.chat.completions.with_raw_response.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Hello"}]
+)
+
+print(raw_response.headers)
+completion = raw_response.parse()
+print(completion.choices[0].message.content)
+```
+
+```typescript TypeScript
+import { OpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+
+const client = wrapOpenAI(new OpenAI());
+
+// Access HTTP headers (TypeScript method varies by SDK version)
+const completion = await client.chat.completions.create({
+  model: "gpt-4o-mini",
+  messages: [{ role: "user", content: "Hello" }]
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+## Token usage tracking
+
+Token usage is automatically extracted and displayed in LangSmith, including:
+
+- Input tokens (prompt)
+- Output tokens (completion)
+- Cached tokens (prompt caching)
+- Reasoning tokens (for models like o1)
+- Audio tokens
+- Service tier information (priority/flex)
+
+All token counts appear in the trace details without any additional configuration.
+
+## Async clients
+
+Both sync and async OpenAI clients are supported:
+
+<CodeGroup>
+
+```python Python
+import openai
+from langsmith import wrappers
+import asyncio
+
+async def main():
+    client = wrappers.wrap_openai(openai.AsyncOpenAI())
+    
+    completion = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "Hello!"}]
+    )
+    
+    print(completion.choices[0].message.content)
+
+asyncio.run(main())
+```
+
+```typescript TypeScript
+import { OpenAI } from "openai";
+import { wrapOpenAI } from "langsmith/wrappers/openai";
+
+// OpenAI SDK is already async in TypeScript
+const client = wrapOpenAI(new OpenAI());
+
+const completion = await client.chat.completions.create({
+  model: "gpt-4o-mini",
+  messages: [{ role: "user", content: "Hello!" }]
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>

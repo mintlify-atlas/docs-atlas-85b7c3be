@@ -1,0 +1,225 @@
+---
+title: Tracing with LangChain
+description: Integrate LangSmith tracing with LangChain applications
+---
+
+LangSmith provides first-class support for tracing LangChain applications. When using LangChain alongside LangSmith, you can automatically capture the full execution trace of your chains, agents, and other components.
+
+## Automatic tracing
+
+LangChain automatically integrates with LangSmith when the appropriate environment variables are set. No code changes are required.
+
+<Steps>
+
+### Set environment variables
+
+Configure your LangSmith API key and project:
+
+```bash
+export LANGSMITH_API_KEY=your-api-key
+export LANGSMITH_TRACING=true
+export LANGSMITH_PROJECT=your-project-name
+```
+
+### Use LangChain normally
+
+Your LangChain code will automatically be traced:
+
+<CodeGroup>
+
+```python Python
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+# Create a simple chain
+llm = ChatOpenAI(model="gpt-4o-mini")
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful assistant."),
+    ("user", "{input}")
+])
+chain = prompt | llm | StrOutputParser()
+
+# Automatically traced to LangSmith
+result = chain.invoke({"input": "What is the capital of France?"})
+print(result)
+```
+
+```typescript TypeScript
+import { ChatOpenAI } from "@langchain/openai";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { StringOutputParser } from "@langchain/core/output_parsers";
+
+// Create a simple chain
+const llm = new ChatOpenAI({ model: "gpt-4o-mini" });
+const prompt = ChatPromptTemplate.fromMessages([
+  ["system", "You are a helpful assistant."],
+  ["user", "{input}"]
+]);
+const chain = prompt.pipe(llm).pipe(new StringOutputParser());
+
+// Automatically traced to LangSmith
+const result = await chain.invoke({
+  input: "What is the capital of France?"
+});
+console.log(result);
+```
+
+</CodeGroup>
+
+</Steps>
+
+## Using traceable with LangChain
+
+You can combine `@traceable` with LangChain to group LangChain runs under a parent trace:
+
+<CodeGroup>
+
+```python Python
+from langsmith import traceable
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+
+llm = ChatOpenAI(model="gpt-4o-mini")
+prompt = ChatPromptTemplate.from_template("{question}")
+chain = prompt | llm
+
+@traceable(name="my_application")
+def my_app(question: str):
+    # LangChain runs will be nested under "my_application"
+    result = chain.invoke({"question": question})
+    return result.content
+
+my_app("What are the main benefits of exercise?")
+```
+
+```typescript TypeScript
+import { traceable } from "langsmith/traceable";
+import { getLangchainCallbacks } from "langsmith/langchain";
+import { ChatOpenAI } from "@langchain/openai";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
+
+const llm = new ChatOpenAI({ model: "gpt-4o-mini" });
+const prompt = ChatPromptTemplate.fromTemplate("{question}");
+const chain = prompt.pipe(llm);
+
+const myApp = traceable(
+  async (question: string) => {
+    // Pass LangSmith callbacks to nest LangChain runs
+    const result = await chain.invoke(
+      { question },
+      { callbacks: await getLangchainCallbacks() }
+    );
+    return result.content;
+  },
+  { name: "my_application" }
+);
+
+await myApp("What are the main benefits of exercise?");
+```
+
+</CodeGroup>
+
+## Streaming with LangChain
+
+Streaming outputs from LangChain are automatically captured:
+
+<CodeGroup>
+
+```python Python
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+
+llm = ChatOpenAI(model="gpt-4o-mini")
+prompt = ChatPromptTemplate.from_template("{topic}")
+chain = prompt | llm
+
+# Stream tokens - automatically traced
+for chunk in chain.stream({"topic": "artificial intelligence"}):
+    print(chunk.content, end="", flush=True)
+```
+
+```typescript TypeScript
+import { ChatOpenAI } from "@langchain/openai";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
+
+const llm = new ChatOpenAI({ model: "gpt-4o-mini" });
+const prompt = ChatPromptTemplate.fromTemplate("{topic}");
+const chain = prompt.pipe(llm);
+
+// Stream tokens - automatically traced
+const stream = await chain.stream({ topic: "artificial intelligence" });
+for await (const chunk of stream) {
+  process.stdout.write(chunk.content);
+}
+```
+
+</CodeGroup>
+
+## Adding metadata and tags
+
+You can add metadata and tags to LangChain runs for better organization:
+
+<CodeGroup>
+
+```python Python
+from langchain_openai import ChatOpenAI
+from langchain_core.runnables import RunnableConfig
+
+llm = ChatOpenAI(model="gpt-4o-mini")
+
+# Add tags and metadata to a run
+result = llm.invoke(
+    "Tell me a joke",
+    config=RunnableConfig(
+        tags=["joke-generator", "production"],
+        metadata={"user_id": "user_123", "session_id": "abc"}
+    )
+)
+```
+
+```typescript TypeScript
+import { ChatOpenAI } from "@langchain/openai";
+
+const llm = new ChatOpenAI({ model: "gpt-4o-mini" });
+
+// Add tags and metadata to a run
+const result = await llm.invoke("Tell me a joke", {
+  tags: ["joke-generator", "production"],
+  metadata: { user_id: "user_123", session_id: "abc" }
+});
+```
+
+</CodeGroup>
+
+## Disabling tracing
+
+To temporarily disable tracing for specific calls:
+
+<CodeGroup>
+
+```python Python
+from langchain_core.runnables import RunnableConfig
+
+# Disable tracing for this specific call
+result = chain.invoke(
+    {"input": "test"},
+    config=RunnableConfig(callbacks=[])
+)
+```
+
+```typescript TypeScript
+// Disable tracing for this specific call
+const result = await chain.invoke(
+  { input: "test" },
+  { callbacks: [] }
+);
+```
+
+</CodeGroup>
+
+Or set the environment variable:
+
+```bash
+export LANGSMITH_TRACING=false
+```
